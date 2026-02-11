@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><title>Video Test</title></head>
+<body>
+  <h1>Direct Video Test</h1>
+  <video id="video" controls width="640" height="360">
+    <source src="http://localhost:3001/media/videos/199ca4b1-5cd0-4ba8-a469-91dc36849d2c.mp4" type="video/mp4">
+  </video>
+  <br><br>
+  <audio id="audio" controls>
+    <source src="http://localhost:3001/media/videos/199ca4b1-5cd0-4ba8-a469-91dc36849d2c.mp4" type="video/mp4">
+  </audio>
+  <script>
+    document.getElementById('video').onerror = (e) => console.log('Video error:', e);
+    document.getElementById('audio').onerror = (e) => console.log('Audio error:', e);
+  </script>
+</body>
+</html>

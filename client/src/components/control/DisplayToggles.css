@@ -1,0 +1,122 @@
+.display-toggles {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  padding: 16px;
+}
+
+.display-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.display-toggles h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.open-display-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--accent-primary);
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toggle-switch {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-switch:hover {
+  background: var(--bg-primary);
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.toggle-track {
+  width: 40px;
+  height: 22px;
+  background: var(--border-color);
+  border-radius: 11px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggle-track.active {
+  background: var(--accent-primary);
+}
+
+.toggle-thumb {
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+}
+
+.toggle-track.active .toggle-thumb {
+  transform: translateX(18px);
+}
+
+.toggle-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option-group label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.option-group select {
+  width: 100%;
+}
+
+.offset-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.offset-controls button {
+  padding: 6px 10px;
+  font-size: 11px;
+  min-width: 50px;
+}
+
+.offset-value {
+  flex: 1;
+  text-align: center;
+  font-family: monospace;
+  font-size: 14px;
+  background: var(--bg-tertiary);
+  padding: 6px 12px;
+  border-radius: 6px;
+}
