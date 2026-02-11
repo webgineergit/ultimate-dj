@@ -119,12 +119,29 @@
   font-size: 14px;
 }
 
+/* Zoomed waveform - detailed view */
+.waveform-zoom-container {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  overflow: hidden;
+  height: 70px;
+  position: relative;
+  border: 1px solid var(--border-color);
+}
+
+.waveform-zoom-canvas {
+  width: 100%;
+  height: 70px;
+  display: block;
+}
+
+/* Overview waveform */
 .waveform-container {
   background: var(--bg-tertiary);
   border-radius: 8px;
   overflow: hidden;
-  min-height: 80px;
-  height: 80px;
+  min-height: 60px;
+  height: 60px;
   position: relative;
   cursor: pointer;
   flex: 1;
@@ -132,7 +149,7 @@
 
 .waveform-canvas {
   width: 100%;
-  height: 80px;
+  height: 60px;
   display: block;
 }
 

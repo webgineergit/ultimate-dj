@@ -11,6 +11,7 @@ function Deck({ deckId, isMain }) {
 
   const audioRef = useRef(null)
   const canvasRef = useRef(null)
+  const zoomCanvasRef = useRef(null)
   const scrubRef = useRef(null)
   const analyserRef = useRef(null)
   const audioContextRef = useRef(null)
@@ -35,11 +36,41 @@ function Deck({ deckId, isMain }) {
   const [audioDevices, setAudioDevices] = useState([])
   const [selectedDevice, setSelectedDevice] = useState('default')
 
+  // Full track waveform data - from server or built progressively
+  const [waveformData, setWaveformData] = useState(null)
+  const waveformDataRef = useRef(null) // Ref for animation loop to avoid stale closures
+  const waveformSamplesRef = useRef([]) // Raw samples collected during playback (fallback)
+  const lastWaveformTimeRef = useRef(0)
+
+  // Refs to avoid stale closures in animation loop
+  const durationRef = useRef(0)
+  const isScrrubbingRef = useRef(false)
+  const scrubTimeRef = useRef(0)
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    waveformDataRef.current = waveformData
+  }, [waveformData])
+
+  useEffect(() => {
+    durationRef.current = duration
+  }, [duration])
+
+  useEffect(() => {
+    isScrrubbingRef.current = isScrubbing
+  }, [isScrubbing])
+
+  useEffect(() => {
+    scrubTimeRef.current = scrubTime
+  }, [scrubTime])
+
   // Scrub state refs (to avoid stale closures)
   const wasPlayingRef = useRef(false)
   const lastScrubXRef = useRef(0)
   const lastScrubTimeRef = useRef(0)
   const seekOnLoadRef = useRef(null)  // Time to seek to after track loads
+  const scrubVelocityRef = useRef(0)
+  const scrubStoppedTimeoutRef = useRef(null)
 
   // Enumerate audio output devices
   useEffect(() => {
@@ -81,6 +112,56 @@ function Deck({ deckId, isMain }) {
     setSelectedDevice(e.target.value)
   }, [])
 
+  // Sample audio levels and build waveform progressively during playback
+  const sampleWaveform = useCallback(() => {
+    if (!analyserRef.current || !audioRef.current || !duration) return
+
+    const analyser = analyserRef.current
+    const currentTime = audioRef.current.currentTime
+    const numSamples = 200
+
+    // Calculate which sample index this time corresponds to
+    const sampleIndex = Math.floor((currentTime / duration) * numSamples)
+
+    // Only sample if we've moved to a new position
+    if (sampleIndex === lastWaveformTimeRef.current) return
+    lastWaveformTimeRef.current = sampleIndex
+
+    // Get frequency data
+    const bufferLength = analyser.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+    analyser.getByteFrequencyData(dataArray)
+
+    // Calculate energy level (average of all frequencies)
+    let sum = 0
+    let peak = 0
+    for (let i = 0; i < bufferLength; i++) {
+      const value = dataArray[i] / 255
+      sum += value
+      if (value > peak) peak = value
+    }
+    const avg = sum / bufferLength
+
+    // Store this sample
+    const samples = waveformSamplesRef.current
+    samples[sampleIndex] = { avg, peak }
+
+    // Update waveform state periodically (every 10 samples to avoid too many re-renders)
+    if (sampleIndex % 10 === 0 || sampleIndex === numSamples - 1) {
+      // Create full waveform array, filling gaps with interpolated values
+      const fullWaveform = []
+      for (let i = 0; i < numSamples; i++) {
+        if (samples[i]) {
+          fullWaveform.push(samples[i])
+        } else {
+          // For unsampled positions, use a default low value
+          fullWaveform.push({ avg: 0.1, peak: 0.15 })
+        }
+      }
+      setWaveformData(fullWaveform)
+    }
+  }, [duration])
+
   // Setup audio analyzer for waveform
   const setupAnalyzer = useCallback(() => {
     if (!audioRef.current) return
@@ -107,39 +188,163 @@ function Deck({ deckId, isMain }) {
     }
   }, [deckId])
 
-  // Draw waveform visualization
+  // Draw full track waveform with playhead and zoomed view
   const drawWaveform = useCallback(() => {
-    if (!canvasRef.current || !analyserRef.current) return
+    if (!canvasRef.current) return
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
-    const bufferLength = analyserRef.current.frequencyBinCount
-    const dataArray = new Uint8Array(bufferLength)
+    const width = canvas.width
+    const height = canvas.height
 
     const draw = () => {
+      // Get zoom canvas inside draw loop to ensure it's available
+      const zoomCanvas = zoomCanvasRef.current
+      const zoomCtx = zoomCanvas?.getContext('2d')
+      const zoomWidth = zoomCanvas?.width || 400
+      const zoomHeight = zoomCanvas?.height || 70
       animationRef.current = requestAnimationFrame(draw)
-      analyserRef.current.getByteFrequencyData(dataArray)
 
-      ctx.fillStyle = '#1a1a25'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      // Get current values from refs (avoids stale closures)
+      const currentWaveformData = waveformDataRef.current
+      const currentDuration = durationRef.current
+      const currentIsScrubbing = isScrrubbingRef.current
+      const currentScrubTime = scrubTimeRef.current
 
-      const barWidth = (canvas.width / bufferLength) * 2.5
-      let x = 0
+      // Sample waveform in real-time only if no pre-generated data
+      const hasPreGeneratedWaveform = currentWaveformData && currentWaveformData.length >= 200
+      if (!hasPreGeneratedWaveform && audioRef.current && !audioRef.current.paused) {
+        sampleWaveform()
+      }
 
+      // Get current playback position
+      const currentTime = currentIsScrubbing ? currentScrubTime : (audioRef.current?.currentTime || 0)
+      const progress = currentDuration > 0 ? currentTime / currentDuration : 0
+      const playheadX = progress * width
+
+      // Use actual waveform length or default to 200 for real-time sampling
+      const numSamples = currentWaveformData?.length || 200
+      const barWidth = width / numSamples
+      const centerY = height / 2
       const color = deckId === 'A' ? '#6366f1' : '#8b5cf6'
+      const playedColor = deckId === 'A' ? '#818cf8' : '#a78bfa'
+      const dimColor = deckId === 'A' ? '#3730a3' : '#5b21b6'
 
-      for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height * 0.8
+      // === DRAW OVERVIEW WAVEFORM ===
+      ctx.fillStyle = '#1a1a25'
+      ctx.fillRect(0, 0, width, height)
 
-        ctx.fillStyle = color
-        ctx.fillRect(x, canvas.height - barHeight, barWidth - 1, barHeight)
+      for (let i = 0; i < numSamples; i++) {
+        const x = i * barWidth
+        const sample = currentWaveformData?.[i]
+        const isPlayed = x < playheadX
 
-        x += barWidth
+        if (sample) {
+          const peakHeight = sample.peak * (height * 0.45)
+          const avgHeight = sample.avg * (height * 0.45)
+
+          ctx.fillStyle = isPlayed ? playedColor : color
+          ctx.globalAlpha = 0.4
+          ctx.fillRect(x, centerY - peakHeight, barWidth - 1, peakHeight * 2)
+
+          ctx.globalAlpha = 1
+          ctx.fillRect(x, centerY - avgHeight, barWidth - 1, avgHeight * 2)
+        } else {
+          ctx.fillStyle = dimColor
+          ctx.globalAlpha = 0.3
+          const placeholderHeight = height * 0.15
+          ctx.fillRect(x, centerY - placeholderHeight, barWidth - 1, placeholderHeight * 2)
+          ctx.globalAlpha = 1
+        }
+      }
+
+      // Draw playhead line on overview
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+      ctx.fillRect(playheadX - 1, 0, 2, height)
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.3)'
+      ctx.shadowBlur = 4
+      ctx.fillRect(playheadX - 1, 0, 2, height)
+      ctx.shadowBlur = 0
+
+      // === DRAW ZOOMED WAVEFORM ===
+      if (zoomCtx && currentWaveformData && currentWaveformData.length > 0) {
+        zoomCtx.fillStyle = '#1a1a25'
+        zoomCtx.fillRect(0, 0, zoomWidth, zoomHeight)
+
+        // Show ~10% of the track, centered on playhead
+        const zoomRange = 0.1 // 10% of track visible
+        const zoomSamples = Math.floor(numSamples * zoomRange)
+        const currentSampleIndex = Math.floor(progress * numSamples)
+
+        // Calculate start/end indices, keeping playhead centered
+        let startIdx = currentSampleIndex - Math.floor(zoomSamples / 2)
+        let endIdx = startIdx + zoomSamples
+
+        // Clamp to valid range
+        if (startIdx < 0) {
+          startIdx = 0
+          endIdx = zoomSamples
+        }
+        if (endIdx > numSamples) {
+          endIdx = numSamples
+          startIdx = Math.max(0, numSamples - zoomSamples)
+        }
+
+        const zoomBarWidth = zoomWidth / zoomSamples
+        const zoomCenterY = zoomHeight / 2
+        const playheadZoomX = ((currentSampleIndex - startIdx) / zoomSamples) * zoomWidth
+
+        // Draw zoomed waveform bars with exaggerated contrast
+        for (let i = 0; i < zoomSamples; i++) {
+          const sampleIdx = startIdx + i
+          const sample = currentWaveformData[sampleIdx]
+          if (!sample) continue
+
+          const x = i * zoomBarWidth
+          const isPlayed = sampleIdx < currentSampleIndex
+
+          // Apply power curve to exaggerate differences (quiet stays low, loud pops)
+          // Using sqrt makes loud parts stand out more
+          const boostPeak = Math.pow(sample.peak, 0.6)  // Boost loud parts
+          const boostAvg = Math.pow(sample.avg, 0.7)
+
+          const peakHeight = boostPeak * (zoomHeight * 0.48)
+          const avgHeight = boostAvg * (zoomHeight * 0.48)
+
+          // Color intensity based on volume - brighter for louder
+          const intensity = sample.peak
+
+          // Peak bars (beats/transients) - use brighter color for loud parts
+          if (intensity > 0.7) {
+            // Loud - use bright accent color
+            zoomCtx.fillStyle = isPlayed ? '#c4b5fd' : '#a78bfa'
+          } else if (intensity > 0.4) {
+            // Medium
+            zoomCtx.fillStyle = isPlayed ? playedColor : color
+          } else {
+            // Quiet - dimmer
+            zoomCtx.fillStyle = isPlayed ? '#6366f1' : '#4f46e5'
+          }
+
+          zoomCtx.globalAlpha = 0.6
+          zoomCtx.fillRect(x, zoomCenterY - peakHeight, zoomBarWidth - 0.5, peakHeight * 2)
+
+          // Average bars (body) - same color logic
+          zoomCtx.globalAlpha = 1
+          zoomCtx.fillRect(x, zoomCenterY - avgHeight, zoomBarWidth - 0.5, avgHeight * 2)
+        }
+
+        // Draw playhead on zoomed view
+        zoomCtx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+        zoomCtx.shadowColor = 'rgba(255, 255, 255, 0.3)'
+        zoomCtx.shadowBlur = 3
+        zoomCtx.fillRect(playheadZoomX - 1, 0, 2, zoomHeight)
+        zoomCtx.shadowBlur = 0
       }
     }
 
     draw()
-  }, [deckId])
+  }, [deckId, sampleWaveform])
 
   // Load track
   useEffect(() => {
@@ -154,6 +359,12 @@ function Deck({ deckId, isMain }) {
       setIsReady(false)
       setDuration(0)
       setError(null)
+      setWaveformData(null)
+      // Stop waveform animation
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+        animationRef.current = null
+      }
       return
     }
 
@@ -161,6 +372,16 @@ function Deck({ deckId, isMain }) {
     setError(null)
 
     const videoUrl = `/media/videos/${deck.track.video_path}`
+
+    // Use pre-generated waveform if available, otherwise reset for real-time sampling
+    if (deck.track.waveform && Array.isArray(deck.track.waveform)) {
+      setWaveformData(deck.track.waveform)
+    } else {
+      // Reset for progressive sampling during playback
+      waveformSamplesRef.current = []
+      lastWaveformTimeRef.current = 0
+      setWaveformData(null)
+    }
 
     // Check current time from store to detect promotion (continuing from a position)
     const currentTime = useDJStore.getState().decks[deckId].time
@@ -197,6 +418,11 @@ function Deck({ deckId, isMain }) {
       setIsReady(true)
       setError(null)
       setupAnalyzer()
+
+      // Start waveform drawing animation
+      if (!animationRef.current) {
+        drawWaveform()
+      }
 
       const isSeekNeeded = seekOnLoadRef.current !== null
 
@@ -255,16 +481,15 @@ function Deck({ deckId, isMain }) {
     }
 
     const handlePlay = () => {
-      if (analyserRef.current && !animationRef.current) {
+      // Ensure waveform animation is running
+      if (!animationRef.current) {
         drawWaveform()
       }
     }
 
     const handlePause = () => {
-      if (animationRef.current && !isScrubbing) {
-        cancelAnimationFrame(animationRef.current)
-        animationRef.current = null
-      }
+      // Keep waveform animation running to show playhead position
+      // Animation will be stopped when track is cleared
     }
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata)
@@ -309,7 +534,7 @@ function Deck({ deckId, isMain }) {
     }
   }, [effectiveVolume])
 
-  // Scrubbing handlers
+  // Vinyl-style scrubbing handlers
   const handleScrubStart = useCallback((e) => {
     const audio = audioRef.current
     if (!audio || !isReady) return
@@ -319,20 +544,30 @@ function Deck({ deckId, isMain }) {
     // Remember if we were playing
     wasPlayingRef.current = !audio.paused
 
-    // Pause during scrub
-    if (!audio.paused) {
-      audio.pause()
-      setDeckState(deckId, { playing: false })
-    }
-
     setIsScrubbing(true)
 
     const rect = scrubRef.current.getBoundingClientRect()
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const time = percent * duration
 
+    // Jump to click position
+    audio.currentTime = time
     setScrubTime(time)
     setDeckState(deckId, { time })
+
+    // Initialize tracking
+    lastScrubXRef.current = e.clientX
+    lastScrubTimeRef.current = Date.now()
+    scrubVelocityRef.current = 0
+
+    // Resume audio context if needed and start playing for scrub audio
+    if (audioContextRef.current?.state === 'suspended') {
+      audioContextRef.current.resume()
+    }
+
+    // Start playing (we'll control rate during scrub)
+    audio.playbackRate = 0.5
+    audio.play().catch(() => {})
   }, [isReady, duration, deckId, setDeckState])
 
   const handleScrubMove = useCallback((e) => {
@@ -345,13 +580,49 @@ function Deck({ deckId, isMain }) {
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const time = percent * duration
 
-    // Update position without playing (smoother, no errors)
+    // Calculate velocity for playback rate
+    const now = Date.now()
+    const deltaTime = now - lastScrubTimeRef.current
+    const deltaX = e.clientX - lastScrubXRef.current
+
+    if (deltaTime > 0 && deltaTime < 100) {
+      // Calculate scrub speed as playback rate
+      const pixelsPerSecond = Math.abs(deltaX / deltaTime) * 1000
+      const waveformWidth = rect.width
+
+      // Map pixel velocity to playback rate (faster scrub = higher rate)
+      const rate = Math.min(2.0, Math.max(0.25, pixelsPerSecond / waveformWidth * 3))
+      audio.playbackRate = rate
+
+      // Make sure audio is playing
+      if (audio.paused) {
+        audio.play().catch(() => {})
+      }
+    }
+
+    // Seek to position
+    try {
+      audio.currentTime = time
+    } catch (e) {
+      // Ignore seek errors
+    }
+
     setScrubTime(time)
     setDeckState(deckId, { time })
     emit('deck:timeUpdate', { deck: deckId, time })
 
     lastScrubXRef.current = e.clientX
-    lastScrubTimeRef.current = Date.now()
+    lastScrubTimeRef.current = now
+
+    // Pause if mouse stops moving
+    if (scrubStoppedTimeoutRef.current) {
+      clearTimeout(scrubStoppedTimeoutRef.current)
+    }
+    scrubStoppedTimeoutRef.current = setTimeout(() => {
+      if (audio && !audio.paused) {
+        audio.pause()
+      }
+    }, 150)
   }, [isScrubbing, duration, deckId, setDeckState, emit])
 
   const handleScrubEnd = useCallback(() => {
@@ -360,32 +631,37 @@ function Deck({ deckId, isMain }) {
     const audio = audioRef.current
     if (!audio) return
 
+    // Clear the stopped timeout
+    if (scrubStoppedTimeoutRef.current) {
+      clearTimeout(scrubStoppedTimeoutRef.current)
+      scrubStoppedTimeoutRef.current = null
+    }
+
     setIsScrubbing(false)
 
-    // Reset playback rate
-    audio.playbackRate = 1
+    // Reset playback rate to normal (accounting for pitch setting)
+    const currentPitch = useDJStore.getState().decks[deckId].pitch || 1
+    audio.playbackRate = currentPitch
 
     // Set final position
     try {
       audio.currentTime = scrubTime
     } catch (e) {
-      console.log('Seek error:', e)
+      // Ignore seek errors
     }
 
     setDeckState(deckId, { time: scrubTime })
     emit('deck:seek', { deck: deckId, time: scrubTime })
 
-    // Resume playing if it was playing before
+    // Resume or pause based on original state
     if (wasPlayingRef.current) {
-      // Small delay to let the audio element settle
-      setTimeout(() => {
-        audio.play().then(() => {
-          setDeckState(deckId, { playing: true })
-          emit('deck:play', { deck: deckId, time: scrubTime })
-        }).catch(err => {
-          console.log('Resume play failed:', err.message)
-        })
-      }, 50)
+      audio.play().then(() => {
+        setDeckState(deckId, { playing: true })
+        emit('deck:play', { deck: deckId, time: scrubTime })
+      }).catch(() => {})
+    } else {
+      audio.pause()
+      setDeckState(deckId, { playing: false })
     }
   }, [isScrubbing, scrubTime, deckId, setDeckState, emit])
 
@@ -419,8 +695,10 @@ function Deck({ deckId, isMain }) {
         emit('deck:play', { deck: deckId, time: audio.currentTime })
         setDeckState(deckId, { playing: true, time: audio.currentTime })
       }).catch(err => {
-        console.error('Play failed:', err)
-        setError('Click page first to enable audio')
+        // Only show error for permission issues, not abort errors from scrubbing
+        if (err.name === 'NotAllowedError') {
+          setError('Click page first to enable audio')
+        }
       })
     }
   }, [deck.playing, deckId, emit, setDeckState, isReady])
@@ -660,7 +938,13 @@ function Deck({ deckId, isMain }) {
         )}
       </div>
 
-      {/* Video + Waveform row */}
+      {/* Zoomed waveform - detailed view around playhead */}
+      <div className="waveform-zoom-container">
+        <canvas ref={zoomCanvasRef} width={400} height={70} className="waveform-zoom-canvas" />
+        {!deck.track && <div className="waveform-placeholder">No track loaded</div>}
+      </div>
+
+      {/* Video + Overview Waveform row */}
       <div className="deck-media-row">
         {/* Video thumbnail */}
         <div className="deck-video-container">
@@ -672,13 +956,13 @@ function Deck({ deckId, isMain }) {
           />
         </div>
 
-        {/* Waveform / Progress display - now draggable */}
+        {/* Overview waveform / Progress display - draggable */}
         <div
           ref={scrubRef}
           className={`waveform-container ${isScrubbing ? 'scrubbing' : ''}`}
           onMouseDown={handleScrubStart}
         >
-          <canvas ref={canvasRef} width={400} height={80} className="waveform-canvas" />
+          <canvas ref={canvasRef} width={400} height={60} className="waveform-canvas" />
           <div className="progress-overlay" style={{ width: `${progressPercent}%` }} />
           <div className="scrub-handle" style={{ left: `${progressPercent}%` }} />
           {!deck.track && <div className="waveform-placeholder">No track loaded</div>}

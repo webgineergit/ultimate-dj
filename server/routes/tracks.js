@@ -1,14 +1,32 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default function tracksRouter(db) {
   const router = express.Router();
+
+  // Helper to parse waveform JSON
+  const parseTrack = (track) => {
+    if (track && track.waveform) {
+      try {
+        track.waveform = JSON.parse(track.waveform);
+      } catch (e) {
+        track.waveform = null;
+      }
+    }
+    return track;
+  };
 
   // Get all tracks
   router.get('/', (req, res) => {
     try {
       const tracks = db.prepare('SELECT * FROM tracks ORDER BY created_at DESC').all();
-      res.json(tracks);
+      res.json(tracks.map(parseTrack));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -21,7 +39,7 @@ export default function tracksRouter(db) {
       if (!track) {
         return res.status(404).json({ error: 'Track not found' });
       }
-      res.json(track);
+      res.json(parseTrack(track));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -66,7 +84,7 @@ export default function tracksRouter(db) {
       }
 
       const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
-      res.json(track);
+      res.json(parseTrack(track));
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -94,11 +112,139 @@ export default function tracksRouter(db) {
         WHERE title LIKE ? OR artist LIKE ?
         ORDER BY created_at DESC
       `).all(query, query);
-      res.json(tracks);
+      res.json(tracks.map(parseTrack));
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Regenerate waveform for a track
+  router.post('/:id/waveform', async (req, res) => {
+    try {
+      const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+      if (!track) {
+        return res.status(404).json({ error: 'Track not found' });
+      }
+
+      const videosDir = path.join(__dirname, '../../data/videos');
+      const videoPath = path.join(videosDir, track.video_path);
+
+      const waveform = await generateWaveform(videoPath);
+      if (waveform) {
+        db.prepare('UPDATE tracks SET waveform = ? WHERE id = ?')
+          .run(JSON.stringify(waveform), req.params.id);
+        res.json({ success: true, waveform });
+      } else {
+        res.status(500).json({ error: 'Failed to generate waveform' });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Regenerate waveforms for all tracks missing them
+  router.post('/regenerate-waveforms', async (req, res) => {
+    try {
+      const tracks = db.prepare('SELECT * FROM tracks WHERE waveform IS NULL').all();
+      const videosDir = path.join(__dirname, '../../data/videos');
+
+      res.json({ message: `Regenerating waveforms for ${tracks.length} tracks`, count: tracks.length });
+
+      // Process in background
+      for (const track of tracks) {
+        try {
+          const videoPath = path.join(videosDir, track.video_path);
+          const waveform = await generateWaveform(videoPath);
+          if (waveform) {
+            db.prepare('UPDATE tracks SET waveform = ? WHERE id = ?')
+              .run(JSON.stringify(waveform), track.id);
+            console.log(`Waveform generated for: ${track.title}`);
+          }
+        } catch (err) {
+          console.log(`Failed to generate waveform for ${track.title}: ${err.message}`);
+        }
+      }
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   });
 
   return router;
+}
+
+// Helper function to generate waveform from video/audio file
+function generateWaveform(filePath, numSamples = 800) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-i', filePath,
+      '-ac', '1',
+      '-ar', '8000',
+      '-f', 's16le',
+      '-'
+    ];
+
+    const ffmpeg = spawn('ffmpeg', args);
+    const chunks = [];
+    let stderr = '';
+
+    ffmpeg.stdout.on('data', (data) => {
+      chunks.push(data);
+    });
+
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to spawn ffmpeg: ${err.message}`));
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg failed`));
+        return;
+      }
+
+      try {
+        const buffer = Buffer.concat(chunks);
+        const samples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+        const samplesPerBar = Math.floor(samples.length / numSamples);
+
+        if (samplesPerBar < 1) {
+          resolve(null);
+          return;
+        }
+
+        const waveform = [];
+        for (let i = 0; i < numSamples; i++) {
+          const start = i * samplesPerBar;
+          const end = Math.min(start + samplesPerBar, samples.length);
+          let sum = 0, peak = 0;
+
+          for (let j = start; j < end; j++) {
+            const value = Math.abs(samples[j]) / 32768;
+            sum += value;
+            if (value > peak) peak = value;
+          }
+
+          waveform.push({
+            avg: Math.round((sum / (end - start)) * 1000) / 1000,
+            peak: Math.round(peak * 1000) / 1000
+          });
+        }
+
+        const maxPeak = Math.max(...waveform.map(w => w.peak));
+        if (maxPeak > 0) {
+          for (const w of waveform) {
+            w.avg = Math.round((w.avg / maxPeak) * 1000) / 1000;
+            w.peak = Math.round((w.peak / maxPeak) * 1000) / 1000;
+          }
+        }
+
+        resolve(waveform);
+      } catch (err) {
+        reject(new Error(`Failed to process audio: ${err.message}`));
+      }
+    });
+  });
 }

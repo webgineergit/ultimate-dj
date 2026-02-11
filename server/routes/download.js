@@ -80,6 +80,20 @@ export default function downloadRouter(db) {
         `thumbnails/${trackId}.jpg`
       );
 
+      downloadProgress.set(trackId, { status: 'generating_waveform', progress: 100, info });
+
+      // Generate waveform data
+      try {
+        const waveform = await generateWaveform(videoPath);
+        if (waveform) {
+          db.prepare('UPDATE tracks SET waveform = ? WHERE id = ?')
+            .run(JSON.stringify(waveform), trackId);
+          console.log(`Waveform generated for: ${info.title} (${waveform.length} samples)`);
+        }
+      } catch (waveformErr) {
+        console.log('Waveform generation failed:', waveformErr.message);
+      }
+
       downloadProgress.set(trackId, { status: 'fetching_lyrics', progress: 100, info });
 
       // Try to fetch lyrics in the background
@@ -182,6 +196,90 @@ function getVideoInfo(url) {
         } catch (e) {
           reject(new Error('Failed to parse video info'));
         }
+      }
+    });
+  });
+}
+
+// Helper function to generate waveform from video/audio file
+function generateWaveform(filePath, numSamples = 800) {
+  return new Promise((resolve, reject) => {
+    // Use ffmpeg to extract audio as raw PCM data
+    const args = [
+      '-i', filePath,
+      '-ac', '1',           // Mono
+      '-ar', '8000',        // 8kHz sample rate (good enough for waveform)
+      '-f', 's16le',        // Raw 16-bit signed little-endian
+      '-'                   // Output to stdout
+    ];
+
+    const ffmpeg = spawn('ffmpeg', args);
+    const chunks = [];
+    let stderr = '';
+
+    ffmpeg.stdout.on('data', (data) => {
+      chunks.push(data);
+    });
+
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to spawn ffmpeg: ${err.message}`));
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg failed: ${stderr.slice(-200)}`));
+        return;
+      }
+
+      try {
+        // Combine all chunks into a single buffer
+        const buffer = Buffer.concat(chunks);
+        const samples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+
+        // Calculate samples per waveform bar
+        const samplesPerBar = Math.floor(samples.length / numSamples);
+        if (samplesPerBar < 1) {
+          resolve(null);
+          return;
+        }
+
+        const waveform = [];
+        for (let i = 0; i < numSamples; i++) {
+          const start = i * samplesPerBar;
+          const end = Math.min(start + samplesPerBar, samples.length);
+
+          let sum = 0;
+          let peak = 0;
+
+          for (let j = start; j < end; j++) {
+            const value = Math.abs(samples[j]) / 32768; // Normalize to 0-1
+            sum += value;
+            if (value > peak) peak = value;
+          }
+
+          const avg = sum / (end - start);
+          waveform.push({
+            avg: Math.round(avg * 1000) / 1000,  // Round to 3 decimal places
+            peak: Math.round(peak * 1000) / 1000
+          });
+        }
+
+        // Normalize the waveform so the max peak is 1.0
+        const maxPeak = Math.max(...waveform.map(w => w.peak));
+        if (maxPeak > 0) {
+          for (const w of waveform) {
+            w.avg = Math.round((w.avg / maxPeak) * 1000) / 1000;
+            w.peak = Math.round((w.peak / maxPeak) * 1000) / 1000;
+          }
+        }
+
+        resolve(waveform);
+      } catch (err) {
+        reject(new Error(`Failed to process audio data: ${err.message}`));
       }
     });
   });

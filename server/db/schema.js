@@ -26,6 +26,7 @@ export function initDatabase() {
       thumbnail_path TEXT,
       lyrics_path TEXT,
       lyrics_offset INTEGER DEFAULT 0,
+      waveform TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -72,6 +73,14 @@ export function initDatabase() {
       value TEXT
     )
   `);
+
+  // Migration: Add waveform column if it doesn't exist
+  try {
+    db.exec('ALTER TABLE tracks ADD COLUMN waveform TEXT');
+    console.log('Added waveform column to tracks table');
+  } catch (e) {
+    // Column already exists, ignore
+  }
 
   console.log('Database initialized successfully');
   return db;
