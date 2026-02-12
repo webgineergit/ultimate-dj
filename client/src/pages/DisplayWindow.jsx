@@ -55,6 +55,7 @@ function DisplayWindow() {
           track={mainDeckState.track}
           playing={mainDeckState.playing}
           currentTime={mainDeckState.time}
+          pitch={mainDeckState.pitch || 1}
         />
       )}
 
@@ -68,6 +69,8 @@ function DisplayWindow() {
         <LyricsOverlay
           trackId={mainDeckState.trackId}
           currentTime={mainDeckState.time}
+          playing={mainDeckState.playing}
+          pitch={mainDeckState.pitch || 1}
         />
       )}
 

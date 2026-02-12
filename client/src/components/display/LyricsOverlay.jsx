@@ -1,9 +1,14 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import './LyricsOverlay.css'
 
-function LyricsOverlay({ trackId, currentTime }) {
+function LyricsOverlay({ trackId, currentTime, playing = false, pitch = 1 }) {
   const [lyrics, setLyrics] = useState([])
   const [loading, setLoading] = useState(false)
+  const [localTime, setLocalTime] = useState(currentTime)
+
+  // Refs for time interpolation
+  const lastSyncTimeRef = useRef(currentTime)
+  const lastSyncRealTimeRef = useRef(Date.now())
 
   // Load lyrics for track
   useEffect(() => {
@@ -27,8 +32,39 @@ function LyricsOverlay({ trackId, currentTime }) {
       .finally(() => setLoading(false))
   }, [trackId])
 
-  // Current time in milliseconds
-  const currentTimeMs = currentTime * 1000
+  // Sync local time when currentTime prop changes significantly
+  useEffect(() => {
+    const timeDiff = Math.abs(currentTime - lastSyncTimeRef.current)
+    // Resync if time jumped more than 0.5 seconds or if paused
+    if (timeDiff > 0.5 || !playing) {
+      setLocalTime(currentTime)
+      lastSyncTimeRef.current = currentTime
+      lastSyncRealTimeRef.current = Date.now()
+    }
+  }, [currentTime, playing])
+
+  // Interpolate time based on pitch when playing
+  useEffect(() => {
+    if (!playing) {
+      setLocalTime(currentTime)
+      return
+    }
+
+    let animationId
+    const animate = () => {
+      const now = Date.now()
+      const elapsed = (now - lastSyncRealTimeRef.current) / 1000 // seconds
+      const interpolatedTime = lastSyncTimeRef.current + (elapsed * pitch)
+      setLocalTime(interpolatedTime)
+      animationId = requestAnimationFrame(animate)
+    }
+
+    animationId = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(animationId)
+  }, [playing, pitch, currentTime])
+
+  // Current time in milliseconds (using interpolated local time)
+  const currentTimeMs = localTime * 1000
 
   // Find current line index
   const currentLineIndex = useMemo(() => {

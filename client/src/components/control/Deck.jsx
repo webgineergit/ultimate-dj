@@ -72,6 +72,13 @@ function Deck({ deckId, isMain }) {
   const scrubVelocityRef = useRef(0)
   const scrubStoppedTimeoutRef = useRef(null)
 
+  // Vinyl scratch state
+  const audioBufferRef = useRef(null)  // Decoded audio for scratching
+  const scratchSourceRef = useRef(null)  // Current scratch audio source
+  const scratchGainRef = useRef(null)  // Gain node for scratch audio
+  const scratchPlayheadRef = useRef(0)  // Current position in samples
+  const lastScratchTimeRef = useRef(0)  // For calculating direction/speed
+
   // Enumerate audio output devices
   useEffect(() => {
     const getDevices = async () => {
@@ -187,6 +194,88 @@ function Deck({ deckId, isMain }) {
       }
     }
   }, [deckId])
+
+  // Load audio into buffer for vinyl scratching
+  const loadAudioBuffer = useCallback(async (url) => {
+    if (!audioContextRef.current) return
+
+    try {
+      const response = await fetch(url)
+      const arrayBuffer = await response.arrayBuffer()
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer)
+      audioBufferRef.current = audioBuffer
+
+      // Create scratch gain node if needed
+      if (!scratchGainRef.current) {
+        scratchGainRef.current = audioContextRef.current.createGain()
+        scratchGainRef.current.connect(audioContextRef.current.destination)
+      }
+    } catch (err) {
+      console.log('Failed to load audio buffer for scratching:', err.message)
+    }
+  }, [])
+
+  // Play a scratch segment (forward or backward)
+  const playScratchSegment = useCallback((startSample, endSample, playbackRate) => {
+    if (!audioBufferRef.current || !audioContextRef.current || !scratchGainRef.current) return
+
+    const buffer = audioBufferRef.current
+    const sampleRate = buffer.sampleRate
+    const numChannels = buffer.numberOfChannels
+
+    // Clamp sample positions
+    const totalSamples = buffer.length
+    startSample = Math.max(0, Math.min(totalSamples - 1, Math.floor(startSample)))
+    endSample = Math.max(0, Math.min(totalSamples, Math.floor(endSample)))
+
+    const isReverse = startSample > endSample
+    const segmentLength = Math.abs(endSample - startSample)
+
+    if (segmentLength < 100) return // Too short to play
+
+    // Create a new buffer for this segment
+    const segmentBuffer = audioContextRef.current.createBuffer(
+      numChannels,
+      segmentLength,
+      sampleRate
+    )
+
+    // Copy samples (reversed if scrubbing backward)
+    for (let channel = 0; channel < numChannels; channel++) {
+      const sourceData = buffer.getChannelData(channel)
+      const destData = segmentBuffer.getChannelData(channel)
+
+      if (isReverse) {
+        // Copy in reverse order for backward scratching
+        for (let i = 0; i < segmentLength; i++) {
+          destData[i] = sourceData[startSample - i]
+        }
+      } else {
+        // Copy forward
+        for (let i = 0; i < segmentLength; i++) {
+          destData[i] = sourceData[startSample + i]
+        }
+      }
+    }
+
+    // Stop previous scratch source
+    if (scratchSourceRef.current) {
+      try {
+        scratchSourceRef.current.stop()
+      } catch (e) {}
+    }
+
+    // Create and play the segment
+    const source = audioContextRef.current.createBufferSource()
+    source.buffer = segmentBuffer
+    source.playbackRate.value = Math.abs(playbackRate)
+    source.connect(scratchGainRef.current)
+    source.start()
+    scratchSourceRef.current = source
+
+    // Update playhead position
+    scratchPlayheadRef.current = endSample
+  }, [])
 
   // Draw full track waveform with playhead and zoomed view
   const drawWaveform = useCallback(() => {
@@ -419,6 +508,11 @@ function Deck({ deckId, isMain }) {
       setError(null)
       setupAnalyzer()
 
+      // Load audio buffer for vinyl scratching (after analyzer creates AudioContext)
+      if (audio.src) {
+        loadAudioBuffer(audio.src)
+      }
+
       // Start waveform drawing animation
       if (!animationRef.current) {
         drawWaveform()
@@ -507,7 +601,7 @@ function Deck({ deckId, isMain }) {
       audio.removeEventListener('play', handlePlay)
       audio.removeEventListener('pause', handlePause)
     }
-  }, [deckId, emit, setDeckState, setDeckTrack, removeFromQueue, setupAnalyzer, drawWaveform, isScrubbing])
+  }, [deckId, emit, setDeckState, setDeckTrack, removeFromQueue, setupAnalyzer, drawWaveform, isScrubbing, loadAudioBuffer])
 
   // Sync play/pause state
   useEffect(() => {
@@ -534,7 +628,7 @@ function Deck({ deckId, isMain }) {
     }
   }, [effectiveVolume])
 
-  // Vinyl-style scrubbing handlers
+  // Vinyl-style scrubbing handlers with true forward/backward audio
   const handleScrubStart = useCallback((e) => {
     const audio = audioRef.current
     if (!audio || !isReady) return
@@ -544,86 +638,93 @@ function Deck({ deckId, isMain }) {
     // Remember if we were playing
     wasPlayingRef.current = !audio.paused
 
+    // Pause and mute the HTML5 audio - we'll use Web Audio for scratching
+    audio.pause()
+
     setIsScrubbing(true)
 
     const rect = scrubRef.current.getBoundingClientRect()
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const time = percent * duration
 
-    // Jump to click position
-    audio.currentTime = time
+    // Set position
     setScrubTime(time)
     setDeckState(deckId, { time })
 
+    // Initialize scratch playhead (in samples)
+    if (audioBufferRef.current) {
+      scratchPlayheadRef.current = Math.floor(time * audioBufferRef.current.sampleRate)
+    }
+
     // Initialize tracking
     lastScrubXRef.current = e.clientX
-    lastScrubTimeRef.current = Date.now()
-    scrubVelocityRef.current = 0
+    lastScratchTimeRef.current = Date.now()
 
-    // Resume audio context if needed and start playing for scrub audio
+    // Resume audio context if needed
     if (audioContextRef.current?.state === 'suspended') {
       audioContextRef.current.resume()
     }
 
-    // Start playing (we'll control rate during scrub)
-    audio.playbackRate = 0.5
-    audio.play().catch(() => {})
-  }, [isReady, duration, deckId, setDeckState])
+    // Set scratch gain volume
+    if (scratchGainRef.current) {
+      scratchGainRef.current.gain.value = effectiveVolume
+    }
+  }, [isReady, duration, deckId, setDeckState, effectiveVolume])
 
   const handleScrubMove = useCallback((e) => {
     if (!isScrubbing) return
+    if (!scrubRef.current || !audioBufferRef.current) return
 
-    const audio = audioRef.current
-    if (!audio || !scrubRef.current) return
+    const buffer = audioBufferRef.current
+    const sampleRate = buffer.sampleRate
 
     const rect = scrubRef.current.getBoundingClientRect()
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     const time = percent * duration
+    const targetSample = Math.floor(time * sampleRate)
 
-    // Calculate velocity for playback rate
+    // Calculate velocity and direction
     const now = Date.now()
-    const deltaTime = now - lastScrubTimeRef.current
+    const deltaTime = now - lastScratchTimeRef.current
     const deltaX = e.clientX - lastScrubXRef.current
 
-    if (deltaTime > 0 && deltaTime < 100) {
-      // Calculate scrub speed as playback rate
+    if (deltaTime > 0 && deltaTime < 100 && Math.abs(deltaX) > 1) {
+      // Calculate how many samples to play based on movement
+      const currentSample = scratchPlayheadRef.current
+      const samplesToPlay = targetSample - currentSample
+
+      // Calculate playback rate based on scrub speed
       const pixelsPerSecond = Math.abs(deltaX / deltaTime) * 1000
       const waveformWidth = rect.width
+      const rate = Math.min(3.0, Math.max(0.5, pixelsPerSecond / waveformWidth * 4))
 
-      // Map pixel velocity to playback rate (faster scrub = higher rate)
-      const rate = Math.min(2.0, Math.max(0.25, pixelsPerSecond / waveformWidth * 3))
-      audio.playbackRate = rate
-
-      // Make sure audio is playing
-      if (audio.paused) {
-        audio.play().catch(() => {})
+      // Play scratch segment (handles forward and backward)
+      if (Math.abs(samplesToPlay) > 100) {
+        playScratchSegment(currentSample, targetSample, rate)
       }
     }
 
-    // Seek to position
-    try {
-      audio.currentTime = time
-    } catch (e) {
-      // Ignore seek errors
-    }
-
+    // Update visual position
     setScrubTime(time)
     setDeckState(deckId, { time })
     emit('deck:timeUpdate', { deck: deckId, time })
 
     lastScrubXRef.current = e.clientX
-    lastScrubTimeRef.current = now
+    lastScratchTimeRef.current = now
 
-    // Pause if mouse stops moving
+    // Stop scratch sound if mouse stops moving
     if (scrubStoppedTimeoutRef.current) {
       clearTimeout(scrubStoppedTimeoutRef.current)
     }
     scrubStoppedTimeoutRef.current = setTimeout(() => {
-      if (audio && !audio.paused) {
-        audio.pause()
+      if (scratchSourceRef.current) {
+        try {
+          scratchSourceRef.current.stop()
+        } catch (e) {}
+        scratchSourceRef.current = null
       }
-    }, 150)
-  }, [isScrubbing, duration, deckId, setDeckState, emit])
+    }, 100)
+  }, [isScrubbing, duration, deckId, setDeckState, emit, playScratchSegment])
 
   const handleScrubEnd = useCallback(() => {
     if (!isScrubbing) return
@@ -637,13 +738,21 @@ function Deck({ deckId, isMain }) {
       scrubStoppedTimeoutRef.current = null
     }
 
+    // Stop scratch audio
+    if (scratchSourceRef.current) {
+      try {
+        scratchSourceRef.current.stop()
+      } catch (e) {}
+      scratchSourceRef.current = null
+    }
+
     setIsScrubbing(false)
 
     // Reset playback rate to normal (accounting for pitch setting)
     const currentPitch = useDJStore.getState().decks[deckId].pitch || 1
     audio.playbackRate = currentPitch
 
-    // Set final position
+    // Set final position on HTML5 audio element
     try {
       audio.currentTime = scrubTime
     } catch (e) {

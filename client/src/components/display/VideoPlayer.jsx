@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './VideoPlayer.css'
 
-function VideoPlayer({ track, playing, currentTime }) {
+function VideoPlayer({ track, playing, currentTime, pitch = 1 }) {
   const videoRef = useRef(null)
   const containerRef = useRef(null)
   const lastSyncedTimeRef = useRef(0)
@@ -108,6 +108,12 @@ function VideoPlayer({ track, playing, currentTime }) {
       videoRef.current.pause()
     }
   }, [playing])
+
+  // Sync playback rate with pitch
+  useEffect(() => {
+    if (!videoRef.current) return
+    videoRef.current.playbackRate = pitch
+  }, [pitch])
 
   // Sync time - this handles both playback drift and scrubbing
   useEffect(() => {
