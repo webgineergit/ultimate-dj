@@ -5,11 +5,12 @@ import './Deck.css'
 
 function Deck({ deckId, isMain }) {
   const { emit } = useSocket()
-  const { decks, crossfader, queue, setDeckState, setDeckTrack, promoteDeck, setCrossfader, removeFromQueue, getEffectiveVolumes } = useDJStore()
+  const { decks, crossfader, queue, setDeckState, setDeckTrack, promoteDeck, setCrossfader, removeFromQueue, getEffectiveVolumes, mainOutputDevice, setMainOutputDevice } = useDJStore()
   const deck = decks[deckId]
   const effectiveVolume = getEffectiveVolumes()[deckId]
 
   const audioRef = useRef(null)
+  const mainMixAudioRef = useRef(null)  // For Deck B: outputs to main device with crossfader
   const canvasRef = useRef(null)
   const zoomCanvasRef = useRef(null)
   const scrubRef = useRef(null)
@@ -116,8 +117,13 @@ function Deck({ deckId, isMain }) {
 
   // Handle device selection change
   const handleDeviceChange = useCallback((e) => {
-    setSelectedDevice(e.target.value)
-  }, [])
+    const device = e.target.value
+    setSelectedDevice(device)
+    // Deck A's device is the main output for crossfaded mix
+    if (deckId === 'A') {
+      setMainOutputDevice(device)
+    }
+  }, [deckId, setMainOutputDevice])
 
   // Sample audio levels and build waveform progressively during playback
   const sampleWaveform = useCallback(() => {
@@ -621,12 +627,72 @@ function Deck({ deckId, isMain }) {
     }
   }, [deck.playing, isReady, deckId, setDeckState, isScrubbing])
 
-  // Sync volume (includes crossfader effect) - use element volume for control
+  // Sync volume - Deck A uses crossfader, Deck B cue is always full volume
   useEffect(() => {
     if (audioRef.current) {
-      audioRef.current.volume = effectiveVolume
+      if (deckId === 'A') {
+        // Deck A: main output with crossfader
+        audioRef.current.volume = effectiveVolume
+      } else {
+        // Deck B: cue output always full volume
+        audioRef.current.volume = deck.volume
+      }
     }
-  }, [effectiveVolume])
+    // Deck B's main mix output (to Deck A's device) uses crossfader
+    if (mainMixAudioRef.current && deckId === 'B') {
+      mainMixAudioRef.current.volume = effectiveVolume
+    }
+  }, [effectiveVolume, deck.volume, deckId])
+
+  // Deck B: Set up main mix audio to output to main device
+  useEffect(() => {
+    if (deckId !== 'B' || !mainMixAudioRef.current) return
+
+    const mainMix = mainMixAudioRef.current
+    if (typeof mainMix.setSinkId === 'function' && mainOutputDevice) {
+      mainMix.setSinkId(mainOutputDevice)
+        .catch(err => console.log('Could not set main mix output:', err.message))
+    }
+  }, [deckId, mainOutputDevice])
+
+  // Deck B: Load same source into main mix audio
+  useEffect(() => {
+    if (deckId !== 'B' || !mainMixAudioRef.current || !deck.track) return
+
+    const videoUrl = `/media/videos/${deck.track.video_path}`
+    const mainMix = mainMixAudioRef.current
+
+    if (mainMix.src !== videoUrl) {
+      mainMix.src = videoUrl
+      mainMix.load()
+    }
+  }, [deckId, deck.track])
+
+  // Deck B: Sync main mix audio playback with main audio
+  useEffect(() => {
+    if (deckId !== 'B' || !mainMixAudioRef.current || !audioRef.current) return
+
+    const audio = audioRef.current
+    const mainMix = mainMixAudioRef.current
+
+    // Sync play/pause
+    if (deck.playing && mainMix.paused && !mainMix.ended) {
+      mainMix.play().catch(() => {})
+    } else if (!deck.playing && !mainMix.paused) {
+      mainMix.pause()
+    }
+
+    // Sync time if drifted
+    const timeDiff = Math.abs(audio.currentTime - mainMix.currentTime)
+    if (timeDiff > 0.1) {
+      mainMix.currentTime = audio.currentTime
+    }
+
+    // Sync playback rate (pitch)
+    if (mainMix.playbackRate !== (deck.pitch || 1)) {
+      mainMix.playbackRate = deck.pitch || 1
+    }
+  }, [deckId, deck.playing, deck.time, deck.pitch])
 
   // Vinyl-style scrubbing handlers with true forward/backward audio
   const handleScrubStart = useCallback((e) => {
@@ -1138,6 +1204,14 @@ function Deck({ deckId, isMain }) {
             className="deck-video"
             playsInline
           />
+          {/* Deck B: hidden audio for main mix output (crossfaded to main speakers) */}
+          {deckId === 'B' && (
+            <audio
+              ref={mainMixAudioRef}
+              preload="metadata"
+              style={{ display: 'none' }}
+            />
+          )}
         </div>
 
         {/* Overview waveform / Progress display - draggable */}

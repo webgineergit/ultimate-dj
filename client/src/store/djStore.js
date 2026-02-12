@@ -27,6 +27,9 @@ export const useDJStore = create((set, get) => ({
   // Current photos folder
   photosFolder: null,
 
+  // Main output device (from Deck A's selection)
+  mainOutputDevice: 'default',
+
   // Audio level for visualizations (0-1)
   audioLevel: 0,
 
@@ -92,6 +95,8 @@ export const useDJStore = create((set, get) => ({
   setShader: (preset) => set({ shader: preset }),
 
   setPhotosFolder: (folder) => set({ photosFolder: folder }),
+
+  setMainOutputDevice: (device) => set({ mainOutputDevice: device }),
 
   setAudioLevel: (level) => set({ audioLevel: level }),
 
