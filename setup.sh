@@ -46,7 +46,14 @@ fi
 # Install yt-dlp if not present
 if ! command_exists yt-dlp; then
     echo "Installing yt-dlp (YouTube downloader)..."
-    brew install yt-dlp
+    # Try pip first (works on older macOS), fall back to brew
+    if command_exists pip3; then
+        pip3 install --user yt-dlp
+        # Add pip user bin to PATH if needed
+        export PATH="$HOME/Library/Python/3.9/bin:$HOME/.local/bin:$PATH"
+    else
+        brew install yt-dlp
+    fi
 else
     echo "yt-dlp already installed"
 fi
@@ -60,6 +67,9 @@ else
 fi
 
 echo ""
+# Ensure pip-installed binaries are in PATH
+export PATH="$HOME/Library/Python/3.9/bin:$HOME/.local/bin:$PATH"
+
 echo "Installing project dependencies..."
 
 # Get the directory where this script is located
