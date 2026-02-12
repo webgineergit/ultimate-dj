@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 client/node_modules/
+.venv/
 
 # Build outputs
 client/dist/

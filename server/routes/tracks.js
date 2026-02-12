@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fetchLyrics, saveLyrics } from '../services/lyrics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -162,6 +163,69 @@ export default function tracksRouter(db) {
           }
         } catch (err) {
           console.log(`Failed to generate waveform for ${track.title}: ${err.message}`);
+        }
+      }
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Refresh lyrics for a track (re-fetch from sources)
+  router.post('/:id/lyrics', async (req, res) => {
+    try {
+      const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+      if (!track) {
+        return res.status(404).json({ error: 'Track not found' });
+      }
+
+      console.log(`Refreshing lyrics for: ${track.title} by ${track.artist} (YT: ${track.youtube_id})`);
+
+      const lyrics = await fetchLyrics(track.title, track.artist, track.youtube_id);
+
+      if (lyrics) {
+        saveLyrics(track.id, lyrics.raw);
+        db.prepare('UPDATE tracks SET lyrics_path = ? WHERE id = ?')
+          .run(`${track.id}.lrc`, track.id);
+
+        res.json({
+          success: true,
+          source: lyrics.source,
+          message: `Lyrics refreshed from ${lyrics.source}`
+        });
+      } else {
+        res.json({
+          success: false,
+          message: 'No lyrics found from any source'
+        });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Refresh lyrics for all tracks
+  router.post('/refresh-all-lyrics', async (req, res) => {
+    try {
+      const tracks = db.prepare('SELECT * FROM tracks').all();
+
+      res.json({ message: `Refreshing lyrics for ${tracks.length} tracks`, count: tracks.length });
+
+      // Process in background
+      for (const track of tracks) {
+        try {
+          console.log(`Refreshing lyrics for: ${track.title}`);
+          const lyrics = await fetchLyrics(track.title, track.artist, track.youtube_id);
+
+          if (lyrics) {
+            saveLyrics(track.id, lyrics.raw);
+            db.prepare('UPDATE tracks SET lyrics_path = ? WHERE id = ?')
+              .run(`${track.id}.lrc`, track.id);
+            console.log(`Lyrics refreshed for ${track.title} (source: ${lyrics.source})`);
+          } else {
+            console.log(`No lyrics found for ${track.title}`);
+          }
+        } catch (err) {
+          console.log(`Failed to refresh lyrics for ${track.title}: ${err.message}`);
         }
       }
     } catch (error) {

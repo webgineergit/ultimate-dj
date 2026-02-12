@@ -1,10 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const lyricsDir = path.join(__dirname, '../../data/lyrics');
+const projectRoot = path.join(__dirname, '../..');
+const venvPython = path.join(projectRoot, '.venv/bin/python');
+const lyricsScript = path.join(__dirname, '../scripts/fetch_ytmusic_lyrics.py');
 
 // Ensure lyrics directory exists
 if (!fs.existsSync(lyricsDir)) {
@@ -13,9 +17,11 @@ if (!fs.existsSync(lyricsDir)) {
 
 /**
  * Fetch lyrics from multiple sources
+ * Priority: Synced lyrics (any source) > Plain lyrics
+ * Within synced: LRCLIB > YouTube Music (LRCLIB has better timing accuracy)
  */
-export async function fetchLyrics(title, artist) {
-  console.log(`Fetching lyrics for: "${title}" by "${artist}"`);
+export async function fetchLyrics(title, artist, youtubeId = null) {
+  console.log(`Fetching lyrics for: "${title}" by "${artist}"${youtubeId ? ` (YT: ${youtubeId})` : ''}`);
 
   // Clean up title - remove common suffixes
   const cleanTitle = title
@@ -30,19 +36,130 @@ export async function fetchLyrics(title, artist) {
     .replace(/\s*HQ$/i, '')
     .trim();
 
+  // Also extract song name if title is in "Artist - Song" format
+  let songName = cleanTitle;
+  if (cleanTitle.includes(' - ')) {
+    const parts = cleanTitle.split(' - ');
+    if (parts.length >= 2) {
+      songName = parts.slice(1).join(' - ').trim();
+    }
+  }
+
   const cleanArtist = artist
     .replace(/\s*-\s*Topic$/i, '')
     .replace(/VEVO$/i, '')
     .trim();
 
-  // Try multiple sources
-  let lyrics = await tryLyricsOvh(cleanTitle, cleanArtist);
-
-  if (!lyrics) {
-    lyrics = await tryLrclib(cleanTitle, cleanArtist);
+  // Try LRCLIB first - it has synced lyrics timed to original audio tracks
+  // which better matches YouTube official music videos
+  const lrclibResult = await tryLrclib(songName, cleanArtist);
+  if (lrclibResult && lrclibResult.source === 'lrclib') {
+    console.log('Using LRCLIB synced lyrics (best match for official videos)');
+    return lrclibResult;
   }
 
-  return lyrics;
+  // Try YouTube Music - but note it may match remix versions with different timing
+  const ytMusicResult = await tryYouTubeMusic(youtubeId, cleanTitle, cleanArtist);
+
+  // Only use YouTube Music synced lyrics (not plain)
+  if (ytMusicResult && ytMusicResult.source === 'youtube_music_synced') {
+    console.log('Using YouTube Music synced lyrics');
+    return ytMusicResult;
+  }
+
+  // Fall back to plain lyrics from YouTube Music (correct text, estimated timing)
+  if (ytMusicResult) {
+    console.log('Using YouTube Music plain lyrics');
+    return ytMusicResult;
+  }
+
+  // Try lyrics.ovh as last resort (plain lyrics only)
+  const lyricsOvhResult = await tryLyricsOvh(songName, cleanArtist);
+  if (lyricsOvhResult) {
+    console.log('Using lyrics.ovh plain lyrics');
+    return lyricsOvhResult;
+  }
+
+  return null;
+}
+
+/**
+ * Try YouTube Music for synced lyrics via Python script
+ */
+async function tryYouTubeMusic(videoId, title, artist) {
+  // Check if Python venv exists
+  if (!fs.existsSync(venvPython)) {
+    console.log('YouTube Music: Python venv not found, skipping');
+    return null;
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const args = [lyricsScript, videoId || '', title || '', artist || ''];
+      const proc = spawn(venvPython, args, {
+        cwd: projectRoot,
+        timeout: 30000
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      const timeout = setTimeout(() => {
+        proc.kill();
+        reject(new Error('Timeout'));
+      }, 30000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0 && stdout) {
+          try {
+            resolve(JSON.parse(stdout));
+          } catch (e) {
+            reject(new Error('Invalid JSON response'));
+          }
+        } else {
+          reject(new Error(stderr || 'Process failed'));
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
+
+    if (result.success && result.lyrics) {
+      console.log(`YouTube Music: Found ${result.synced ? 'synced' : 'plain'} lyrics`);
+
+      if (result.synced) {
+        // Already in LRC format
+        return {
+          raw: result.lyrics,
+          parsed: parseLRC(result.lyrics),
+          source: 'youtube_music_synced'
+        };
+      } else {
+        // Plain lyrics - convert to LRC with estimated timing
+        return {
+          raw: convertToLRC(result.lyrics),
+          parsed: parseSimpleLyrics(result.lyrics),
+          source: 'youtube_music'
+        };
+      }
+    }
+  } catch (err) {
+    console.log('YouTube Music failed:', err.message);
+  }
+
+  return null;
 }
 
 /**
@@ -81,7 +198,7 @@ async function tryLrclib(title, artist) {
     const url = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
     const response = await fetch(url, {
       headers: { 'User-Agent': 'UltimateDJ/1.0' },
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(20000)  // 20 second timeout
     });
 
     if (!response.ok) return null;

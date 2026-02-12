@@ -22,17 +22,25 @@ function DisplayWindow() {
     }
   }
 
-  // Fetch track details when main deck changes
+  // Fetch track details when main deck's trackId changes
   useEffect(() => {
-    if (mainDeckState.trackId && !mainDeckState.track) {
-      fetch(`/api/tracks/${mainDeckState.trackId}`)
+    const trackId = mainDeckState.trackId
+    const currentTrack = mainDeckState.track
+
+    // Fetch if we have a trackId but no track, or if trackId doesn't match current track
+    if (trackId && (!currentTrack || currentTrack.id !== trackId)) {
+      fetch(`/api/tracks/${trackId}`)
         .then(res => res.json())
         .then(track => {
-          useDJStore.getState().setDeckTrack(mainDeck, track)
+          // Only update if this is still the current track (avoid race conditions)
+          const currentState = useDJStore.getState().decks[mainDeck]
+          if (currentState.trackId === trackId) {
+            useDJStore.getState().setDeckState(mainDeck, { track })
+          }
         })
         .catch(console.error)
     }
-  }, [mainDeckState.trackId, mainDeck])
+  }, [mainDeckState.trackId, mainDeckState.track, mainDeck])
 
   return (
     <div className="display-window" onDoubleClick={handleDoubleClick}>

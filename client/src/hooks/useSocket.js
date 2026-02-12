@@ -41,7 +41,8 @@ export function useSocket() {
 
     // Deck events
     socket.on('deck:load', ({ deck, trackId, autoplay }) => {
-      setDeckState(deck, { trackId, time: 0, playing: autoplay || false })
+      // Clear the old track and set new trackId - DisplayWindow will fetch the track details
+      setDeckState(deck, { trackId, track: null, time: 0, playing: autoplay || false })
     })
 
     socket.on('deck:play', ({ deck, time }) => {

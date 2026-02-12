@@ -96,9 +96,9 @@ export default function downloadRouter(db) {
 
       downloadProgress.set(trackId, { status: 'fetching_lyrics', progress: 100, info });
 
-      // Try to fetch lyrics in the background
+      // Try to fetch lyrics in the background (pass YouTube ID for better matching)
       try {
-        const lyrics = await fetchLyrics(info.title, info.artist || info.uploader);
+        const lyrics = await fetchLyrics(info.title, info.artist || info.uploader, info.id);
         if (lyrics) {
           saveLyrics(trackId, lyrics.raw);
           db.prepare('UPDATE tracks SET lyrics_path = ? WHERE id = ?')

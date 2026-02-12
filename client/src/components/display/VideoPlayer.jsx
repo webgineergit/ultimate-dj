@@ -3,7 +3,7 @@ import './VideoPlayer.css'
 
 function VideoPlayer({ track, playing, currentTime }) {
   const videoRef = useRef(null)
-  const lastTimeRef = useRef(0)
+  const lastSyncedTimeRef = useRef(0)
 
   // Load video when track changes
   useEffect(() => {
@@ -16,7 +16,7 @@ function VideoPlayer({ track, playing, currentTime }) {
     }
   }, [track])
 
-  // Handle play/pause
+  // Handle play/pause state changes
   useEffect(() => {
     if (!videoRef.current) return
 
@@ -29,18 +29,26 @@ function VideoPlayer({ track, playing, currentTime }) {
     }
   }, [playing])
 
-  // Sync time with audio (only if significantly different)
+  // Sync time - this handles both playback drift and scrubbing
   useEffect(() => {
-    if (!videoRef.current || !playing) return
+    if (!videoRef.current) return
 
-    const timeDiff = Math.abs(videoRef.current.currentTime - currentTime)
+    const video = videoRef.current
+    const videoTime = video.currentTime
+    const timeDiff = Math.abs(videoTime - currentTime)
 
-    // Only sync if difference is more than 0.5 seconds
-    if (timeDiff > 0.5) {
-      videoRef.current.currentTime = currentTime
+    // Always sync if:
+    // - Time difference is significant (> 0.2 seconds)
+    // - We're paused (need to follow scrubbing exactly)
+    // - Time jumped more than 1 second (user seeked)
+    const timeJumped = Math.abs(currentTime - lastSyncedTimeRef.current) > 1
+    const needsSync = timeDiff > 0.2 || (!playing && timeDiff > 0.01) || timeJumped
+
+    if (needsSync) {
+      video.currentTime = currentTime
     }
 
-    lastTimeRef.current = currentTime
+    lastSyncedTimeRef.current = currentTime
   }, [currentTime, playing])
 
   if (!track) return null

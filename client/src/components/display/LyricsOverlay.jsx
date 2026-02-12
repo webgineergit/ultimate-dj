@@ -3,14 +3,16 @@ import { useDJStore } from '../../store/djStore'
 import './LyricsOverlay.css'
 
 function LyricsOverlay({ trackId, currentTime }) {
-  const { lyricsOffset } = useDJStore()
+  const { lyricsOffset } = useDJStore()  // Global offset for fine-tuning
   const [lyrics, setLyrics] = useState([])
+  const [trackOffset, setTrackOffset] = useState(0)  // Per-track offset
   const [loading, setLoading] = useState(false)
 
   // Load lyrics for track
   useEffect(() => {
     if (!trackId) {
       setLyrics([])
+      setTrackOffset(0)
       return
     }
 
@@ -22,15 +24,17 @@ function LyricsOverlay({ trackId, currentTime }) {
       })
       .then(data => {
         setLyrics(data.lyrics || [])
+        setTrackOffset(data.offset || 0)  // Use per-track offset from API
       })
       .catch(() => {
         setLyrics([])
+        setTrackOffset(0)
       })
       .finally(() => setLoading(false))
   }, [trackId])
 
-  // Calculate adjusted current time with offset
-  const adjustedTime = (currentTime * 1000) + lyricsOffset
+  // Calculate adjusted current time with both global and per-track offset
+  const adjustedTime = (currentTime * 1000) + lyricsOffset + trackOffset
 
   // Find current line index
   const currentLineIndex = useMemo(() => {
