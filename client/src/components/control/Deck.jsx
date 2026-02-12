@@ -390,21 +390,21 @@ function Deck({ deckId, isMain }) {
     // Save the time to seek to after load (for seamless promotion)
     seekOnLoadRef.current = isPromotion ? currentTime : null
 
-    if (isPromotion) {
-      // For promotion: load immediately, no delay
-      if (audioRef.current) {
-        audioRef.current.src = videoUrl
-        audioRef.current.load()
+    // Check if we should autoplay
+    const shouldAutoplay = useDJStore.getState().decks[deckId].playing
+
+    // Load audio immediately - no delay to preserve user gesture for autoplay
+    if (audioRef.current) {
+      audioRef.current.src = videoUrl
+      audioRef.current.load()
+
+      // Queue play immediately while still in user gesture context
+      // Browser will start playing once audio is ready
+      if (shouldAutoplay) {
+        audioRef.current.play().catch(() => {
+          // Will retry in handleLoadedMetadata if needed
+        })
       }
-    } else {
-      // For new tracks: small delay to prevent audio pop
-      const timeoutId = setTimeout(() => {
-        if (audioRef.current) {
-          audioRef.current.src = videoUrl
-          audioRef.current.load()
-        }
-      }, 50)
-      return () => clearTimeout(timeoutId)
     }
   }, [deck.track, deckId])
 

@@ -60,11 +60,24 @@ let djState = {
   photosFolder: null
 };
 
+// Track last activity to detect stale state
+let lastTimeUpdate = 0;
+const STALE_TIMEOUT = 5000; // Consider state stale after 5 seconds of no updates
+
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   // Send current state to newly connected client
+  // If state is stale (no recent time updates), send empty decks
+  const isStale = Date.now() - lastTimeUpdate > STALE_TIMEOUT;
+  if (isStale && djState.decks.A.trackId) {
+    console.log('State is stale, clearing decks for new client');
+    djState.decks = {
+      A: { trackId: null, playing: false, time: 0, volume: 1, pitch: 1 },
+      B: { trackId: null, playing: false, time: 0, volume: 1, pitch: 1 }
+    };
+  }
   socket.emit('sync:state', djState);
 
   // Handle sync requests
@@ -77,6 +90,7 @@ io.on('connection', (socket) => {
     djState.decks[deck].trackId = trackId;
     djState.decks[deck].time = 0;
     djState.decks[deck].playing = autoplay || false;
+    lastTimeUpdate = Date.now(); // Track activity
     // Broadcast to others only - sender already updated locally
     socket.broadcast.emit('deck:load', { deck, trackId, autoplay });
   });
@@ -157,6 +171,7 @@ io.on('connection', (socket) => {
   // Time sync (frequent updates from control to display)
   socket.on('deck:timeUpdate', ({ deck, time }) => {
     djState.decks[deck].time = time;
+    lastTimeUpdate = Date.now(); // Track activity
     socket.broadcast.emit('deck:timeUpdate', { deck, time });
   });
 
@@ -167,6 +182,16 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
+
+    // Clear deck state when last client disconnects
+    // This prevents stale videos from showing when display reconnects
+    if (io.sockets.sockets.size === 0) {
+      console.log('No clients connected - clearing deck state');
+      djState.decks = {
+        A: { trackId: null, playing: false, time: 0, volume: 1, pitch: 1 },
+        B: { trackId: null, playing: false, time: 0, volume: 1, pitch: 1 }
+      };
+    }
   });
 });
 

@@ -26,4 +26,5 @@
   object-fit: contain;
   background: transparent;
   border-radius: 8px;
+  opacity: 0.85;
 }

@@ -95,6 +95,14 @@ export const useDJStore = create((set, get) => ({
 
   setAudioLevel: (level) => set({ audioLevel: level }),
 
+  // Clear all decks (used when connection is lost)
+  clearDecks: () => set({
+    decks: {
+      A: { trackId: null, track: null, playing: false, time: 0, volume: 1, pitch: 1, detectedBpm: null },
+      B: { trackId: null, track: null, playing: false, time: 0, volume: 1, pitch: 1, detectedBpm: null }
+    }
+  }),
+
   setTracks: (tracks) => set({ tracks }),
 
   addTrack: (track) => set((state) => ({

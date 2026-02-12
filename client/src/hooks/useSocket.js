@@ -23,6 +23,8 @@ export function getSocket() {
 
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason)
+      // Clear decks when connection is lost so display doesn't show stale content
+      useDJStore.getState().clearDecks()
     })
 
     socket.on('reconnect', (attemptNumber) => {

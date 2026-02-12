@@ -42,9 +42,29 @@ function LyricsOverlay({ trackId, currentTime }) {
     return -1
   }, [lyrics, currentTimeMs])
 
+  // Check if we're in the pre-lyrics window (2 seconds before first lyric)
+  const isPreLyrics = useMemo(() => {
+    if (lyrics.length === 0) return false
+    const firstLyricTime = lyrics[0].time
+    const previewWindow = 2000 // 2 seconds before
+    return currentTimeMs >= firstLyricTime - previewWindow && currentTimeMs < firstLyricTime
+  }, [lyrics, currentTimeMs])
+
   // Get visible lines (current + context)
   const visibleLines = useMemo(() => {
-    if (lyrics.length === 0 || currentLineIndex === -1) return []
+    if (lyrics.length === 0) return []
+
+    // Show first few lines as preview before lyrics start
+    if (isPreLyrics) {
+      const end = Math.min(lyrics.length, 3)
+      return lyrics.slice(0, end).map((line, i) => ({
+        ...line,
+        isCurrent: i === 0, // First line is "upcoming"
+        relativeIndex: i
+      }))
+    }
+
+    if (currentLineIndex === -1) return []
 
     const start = Math.max(0, currentLineIndex - 1)
     const end = Math.min(lyrics.length, currentLineIndex + 3)
@@ -54,10 +74,12 @@ function LyricsOverlay({ trackId, currentTime }) {
       isCurrent: start + i === currentLineIndex,
       relativeIndex: i - (currentLineIndex - start)
     }))
-  }, [lyrics, currentLineIndex])
+  }, [lyrics, currentLineIndex, isPreLyrics])
 
   // Calculate progress within current line
   const lineProgress = useMemo(() => {
+    // No progress during pre-lyrics preview
+    if (isPreLyrics) return 0
     if (currentLineIndex === -1 || currentLineIndex >= lyrics.length - 1) return 0
 
     const currentLine = lyrics[currentLineIndex]
@@ -69,7 +91,7 @@ function LyricsOverlay({ trackId, currentTime }) {
     // Scale so progress reaches 100% at ~75% of the line duration
     const vocalDuration = lineDuration * 0.75
     return Math.min(1, Math.max(0, elapsed / vocalDuration))
-  }, [lyrics, currentLineIndex, currentTimeMs])
+  }, [lyrics, currentLineIndex, currentTimeMs, isPreLyrics])
 
   // Check if we're past the last lyric (hide after 5 seconds past last line)
   const isPastLastLyric = useMemo(() => {
