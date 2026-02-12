@@ -57,8 +57,7 @@ let djState = {
     lyrics: false
   },
   shader: 'plasma',
-  photosFolder: null,
-  lyricsOffset: 0
+  photosFolder: null
 };
 
 // Socket.io connection handling
@@ -155,16 +154,15 @@ io.on('connection', (socket) => {
     io.emit('photos:folder', { folder });
   });
 
-  // Lyrics offset
-  socket.on('lyrics:offset', ({ offset }) => {
-    djState.lyricsOffset = offset;
-    io.emit('lyrics:offset', { offset });
-  });
-
   // Time sync (frequent updates from control to display)
   socket.on('deck:timeUpdate', ({ deck, time }) => {
     djState.decks[deck].time = time;
     socket.broadcast.emit('deck:timeUpdate', { deck, time });
+  });
+
+  // Audio level for visualizations (real-time, no state storage)
+  socket.on('audio:level', ({ level }) => {
+    socket.broadcast.emit('audio:level', { level });
   });
 
   socket.on('disconnect', () => {

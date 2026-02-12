@@ -6,8 +6,36 @@ let socket = null
 
 export function getSocket() {
   if (!socket) {
-    socket = io('/', {
-      transports: ['websocket', 'polling']
+    // Connect directly to backend server - Vite proxy has issues with websocket events
+    const serverUrl = import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin
+    console.log('Connecting socket to:', serverUrl)
+    socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+      withCredentials: false,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000
+    })
+
+    socket.on('connect', () => {
+      console.log('Socket connected:', socket.id)
+    })
+
+    socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason)
+    })
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log('Socket reconnected after', attemptNumber, 'attempts')
+    })
+
+    socket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err.message)
+    })
+
+    // Audio level listener - set up here so it persists
+    socket.on('audio:level', ({ level }) => {
+      useDJStore.getState().setAudioLevel(level)
     })
   }
   return socket
@@ -22,14 +50,16 @@ export function useSocket() {
     setDisplayState,
     setShader,
     setPhotosFolder,
-    setLyricsOffset,
+    setAudioLevel,
     setFullState,
     promoteDeck
   } = useDJStore()
 
   useEffect(() => {
+    console.log('useSocket effect running - setting up listeners')
     socketRef.current = getSocket()
     const socket = socketRef.current
+    console.log('useSocket - socket connected:', socket.connected, 'id:', socket.id)
 
     // Request initial state
     socket.emit('sync:request')
@@ -97,10 +127,7 @@ export function useSocket() {
       setPhotosFolder(folder)
     })
 
-    // Lyrics
-    socket.on('lyrics:offset', ({ offset }) => {
-      setLyricsOffset(offset)
-    })
+    // Audio level listener is now set up in getSocket() to persist
 
     return () => {
       // Don't disconnect on cleanup - we want to keep the connection alive
@@ -117,7 +144,7 @@ export function useSocket() {
       socket.off('display:toggle')
       socket.off('shader:select')
       socket.off('photos:folder')
-      socket.off('lyrics:offset')
+      // audio:level listener is set up in getSocket() and should persist
     }
   }, [])
 

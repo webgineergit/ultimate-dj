@@ -27,8 +27,8 @@ export const useDJStore = create((set, get) => ({
   // Current photos folder
   photosFolder: null,
 
-  // Lyrics offset in milliseconds
-  lyricsOffset: 0,
+  // Audio level for visualizations (0-1)
+  audioLevel: 0,
 
   // Track library
   tracks: [],
@@ -93,7 +93,7 @@ export const useDJStore = create((set, get) => ({
 
   setPhotosFolder: (folder) => set({ photosFolder: folder }),
 
-  setLyricsOffset: (offset) => set({ lyricsOffset: offset }),
+  setAudioLevel: (level) => set({ audioLevel: level }),
 
   setTracks: (tracks) => set({ tracks }),
 
@@ -124,8 +124,7 @@ export const useDJStore = create((set, get) => ({
     mainDeck: serverState.mainDeck,
     display: serverState.display,
     shader: serverState.shader,
-    photosFolder: serverState.photosFolder,
-    lyricsOffset: serverState.lyricsOffset
+    photosFolder: serverState.photosFolder
   }),
 
   // Computed values

@@ -13,7 +13,7 @@ const SHADER_PRESETS = [
 
 function DisplayToggles() {
   const { emit } = useSocket()
-  const { display, setDisplayState, shader, setShader, photosFolder, setPhotosFolder, lyricsOffset, setLyricsOffset } = useDJStore()
+  const { display, setDisplayState, shader, setShader, photosFolder, setPhotosFolder } = useDJStore()
   const [photoFolders, setPhotoFolders] = useState([])
 
   // Load photo folders
@@ -41,12 +41,6 @@ function DisplayToggles() {
     setPhotosFolder(folder)
     emit('photos:folder', { folder })
   }, [emit, setPhotosFolder])
-
-  const handleOffsetChange = useCallback((delta) => {
-    const newOffset = lyricsOffset + delta
-    setLyricsOffset(newOffset)
-    emit('lyrics:offset', { offset: newOffset })
-  }, [emit, lyricsOffset, setLyricsOffset])
 
   const openDisplayWindow = () => {
     window.open('/display', 'display', 'width=1280,height=720')
@@ -104,17 +98,6 @@ function DisplayToggles() {
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="option-group">
-          <label>Lyrics Offset</label>
-          <div className="offset-controls">
-            <button onClick={() => handleOffsetChange(-500)}>-0.5s</button>
-            <button onClick={() => handleOffsetChange(-100)}>-0.1s</button>
-            <span className="offset-value">{(lyricsOffset / 1000).toFixed(1)}s</span>
-            <button onClick={() => handleOffsetChange(100)}>+0.1s</button>
-            <button onClick={() => handleOffsetChange(500)}>+0.5s</button>
-          </div>
         </div>
       </div>
     </div>

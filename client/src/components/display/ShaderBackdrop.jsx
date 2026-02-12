@@ -16,19 +16,23 @@ const SHADERS = {
         vec2 p = uv * 2.0 - 1.0;
         p.x *= resolution.x / resolution.y;
 
+        float beat = audioLevel;
         float t = time * 0.5;
-        float audioBoost = 1.0 + audioLevel * 2.0;
 
-        float v1 = sin(p.x * 3.0 * audioBoost + t);
-        float v2 = sin(3.0 * (p.x * sin(t * 0.5) + p.y * cos(t * 0.3)) + t);
-        float v3 = sin(length(p * 4.0 * audioBoost) + t);
+        // Plasma pattern - strong movement increase with beat
+        float speed = 1.0 + beat * 2.5;
+        float scale = 3.0 + beat * 3.0;
+
+        float v1 = sin(p.x * scale + t * speed);
+        float v2 = sin(scale * (p.x * sin(t * 0.5 * speed) + p.y * cos(t * 0.3 * speed)) + t * speed);
+        float v3 = sin(length(p * (4.0 + beat * 4.0)) + t * speed);
         float v = v1 + v2 + v3;
 
-        vec3 col1 = vec3(0.4, 0.4, 0.9);
-        vec3 col2 = vec3(0.5, 0.3, 0.8);
-        vec3 col = mix(col1, col2, sin(v * 3.14159) * 0.5 + 0.5);
+        // Minimal color change on beat
+        vec3 baseCol = vec3(0.15, 0.06, 0.25) * (sin(v * 3.14159) * 0.3 + 0.7);
+        vec3 col = baseCol + vec3(0.02, 0.01, 0.03) * beat;
 
-        gl_FragColor = vec4(col * (0.7 + audioLevel * 0.5), 1.0);
+        gl_FragColor = vec4(col, 1.0);
       }
     `
   },
@@ -40,16 +44,24 @@ const SHADERS = {
 
       void main() {
         vec2 uv = gl_FragCoord.xy / resolution.xy;
+        float beat = audioLevel;
 
-        float wave = sin(uv.x * 20.0 + time * 3.0) * 0.1 * (1.0 + audioLevel * 3.0);
-        wave += sin(uv.x * 10.0 - time * 2.0) * 0.05 * (1.0 + audioLevel * 2.0);
-
+        // Wave animation - strong amplitude increase with beat
+        float waveAmp = 0.04 + beat * 0.18;
+        float wave = sin(uv.x * 20.0 + time * 3.0) * waveAmp;
         float dist = abs(uv.y - 0.5 - wave);
-        float glow = 0.02 / dist;
+
+        // Glow size increases with beat
+        float glowSize = 0.015 + beat * 0.02;
+        float glow = glowSize / dist;
         glow = clamp(glow, 0.0, 1.0);
 
-        vec3 col = vec3(0.4, 0.4, 1.0) * glow;
-        col += vec3(0.6, 0.3, 0.8) * glow * audioLevel;
+        // Background: very subtle pulse on beat
+        vec3 bgCol = vec3(0.03, 0.03, 0.1) + vec3(0.03, 0.01, 0.04) * beat;
+
+        // Wave line color stays mostly consistent
+        vec3 waveCol = vec3(0.45, 0.45, 0.95) + vec3(0.05, 0.05, 0.05) * beat;
+        vec3 col = bgCol + waveCol * glow;
 
         gl_FragColor = vec4(col, 1.0);
       }
@@ -67,22 +79,32 @@ const SHADERS = {
 
       void main() {
         vec2 uv = gl_FragCoord.xy / resolution.xy;
-        vec3 col = vec3(0.0);
+        float beat = audioLevel;
+
+        // Background - minimal change
+        vec3 col = vec3(0.02, 0.015, 0.06);
+
+        // Particle speed increases significantly with beat
+        float speedMult = 1.0 + beat * 3.0;
 
         for(int i = 0; i < 50; i++) {
           vec2 pos = vec2(
             rand(vec2(float(i), 0.0)),
-            mod(rand(vec2(0.0, float(i))) + time * 0.1 * (0.5 + rand(vec2(float(i), float(i)))), 1.0)
+            mod(rand(vec2(0.0, float(i))) + time * 0.1 * speedMult * (0.5 + rand(vec2(float(i), float(i)))), 1.0)
           );
 
-          float size = 0.01 + audioLevel * 0.02;
+          // Particles grow significantly on beat
+          float baseSize = 0.008;
+          float beatSize = 0.025;
+          float size = baseSize + beat * beatSize;
           float d = length(uv - pos);
           float glow = size / d;
           glow = clamp(glow, 0.0, 1.0);
 
+          // Consistent particle color
           vec3 particleCol = mix(
-            vec3(0.4, 0.4, 1.0),
-            vec3(0.8, 0.3, 0.8),
+            vec3(0.4, 0.4, 0.9),
+            vec3(0.6, 0.3, 0.75),
             rand(vec2(float(i), float(i) * 2.0))
           );
 
@@ -104,23 +126,30 @@ const SHADERS = {
         vec2 p = uv * 2.0 - 1.0;
         p.x *= resolution.x / resolution.y;
 
+        float beat = audioLevel;
         float a = atan(p.y, p.x);
         float r = length(p);
 
-        float t = time * 0.5 + audioLevel;
-        float rings = sin(r * 10.0 - t * 3.0) * 0.5 + 0.5;
-        float spiral = sin(a * 5.0 + r * 5.0 - t * 2.0) * 0.5 + 0.5;
+        // Tunnel speed increases dramatically on beat
+        float speed = 1.0 + beat * 4.0;
+        float t = time * 0.5 * speed;
+
+        // Ring density increases significantly on beat
+        float ringScale = 8.0 + beat * 10.0;
+        float rings = sin(r * ringScale - t * 3.0) * 0.5 + 0.5;
+
+        // Spiral complexity increases on beat
+        float spiralScale = 4.0 + beat * 4.0;
+        float spiral = sin(a * spiralScale + r * 5.0 - t * 2.0) * 0.5 + 0.5;
 
         float v = rings * spiral;
-        v *= 1.0 - r * 0.5;
+        v *= 1.0 - r * 0.4;
 
-        vec3 col = mix(
-          vec3(0.2, 0.2, 0.6),
-          vec3(0.6, 0.2, 0.8),
-          v
-        );
+        // Consistent colors - minimal brightness change
+        vec3 darkCol = vec3(0.1, 0.1, 0.35);
+        vec3 lightCol = vec3(0.45, 0.2, 0.6);
 
-        col *= 1.0 + audioLevel * 0.5;
+        vec3 col = mix(darkCol, lightCol, v);
 
         gl_FragColor = vec4(col, 1.0);
       }
@@ -137,10 +166,16 @@ const SHADERS = {
         vec2 p = uv * 2.0 - 1.0;
         p.x *= resolution.x / resolution.y;
 
+        float beat = audioLevel;
         float t = time * 0.3;
-        float zoom = 2.0 + sin(t * 0.5) * 0.5 + audioLevel;
 
-        vec2 c = vec2(-0.7 + sin(t * 0.2) * 0.1, 0.27 + cos(t * 0.3) * 0.1);
+        // Strong zoom pulse on beat
+        float baseZoom = 2.0 + sin(t * 0.5) * 0.5;
+        float zoom = baseZoom + beat * 1.8;
+
+        // Julia set parameters shift significantly on beat
+        float shift = 0.1 + beat * 0.2;
+        vec2 c = vec2(-0.7 + sin(t * 0.2) * shift, 0.27 + cos(t * 0.3) * shift);
         vec2 z = p * zoom;
 
         float iter = 0.0;
@@ -153,13 +188,11 @@ const SHADERS = {
         float col = iter / 50.0;
         col = pow(col, 0.5);
 
-        vec3 color = mix(
-          vec3(0.1, 0.1, 0.3),
-          vec3(0.5, 0.2, 0.8),
-          col
-        );
+        // Consistent colors - no brightness change
+        vec3 darkCol = vec3(0.08, 0.08, 0.25);
+        vec3 lightCol = vec3(0.45, 0.2, 0.65);
 
-        color *= 1.0 + audioLevel * 0.3;
+        vec3 color = mix(darkCol, lightCol, col);
 
         gl_FragColor = vec4(color, 1.0);
       }
@@ -179,9 +212,28 @@ function ShaderBackdrop() {
   const sceneRef = useRef(null)
   const materialRef = useRef(null)
   const animationRef = useRef(null)
-  const audioLevelRef = useRef(0)
 
   const { shader } = useDJStore()
+
+  // Track beats with local decay
+  const lastBeatTimeRef = useRef(0)
+
+  // Listen for beat events from store
+  useEffect(() => {
+    const MIN_BEAT_INTERVAL = 100 // Minimum ms between beats to avoid duplicates
+
+    const unsubscribe = useDJStore.subscribe((state) => {
+      const level = state.audioLevel
+      const now = Date.now()
+
+      // Accept any beat (level > 0.5) if enough time has passed since last one
+      if (level > 0.5 && (now - lastBeatTimeRef.current) > MIN_BEAT_INTERVAL) {
+        lastBeatTimeRef.current = now
+      }
+    })
+    return unsubscribe
+  }, [])
+
 
   // Initialize Three.js
   useEffect(() => {
@@ -229,9 +281,11 @@ function ShaderBackdrop() {
       const elapsed = (Date.now() - startTime) / 1000
       material.uniforms.time.value = elapsed
 
-      // Simulate audio level (in production, this would come from actual audio analysis)
-      audioLevelRef.current = Math.sin(elapsed * 2) * 0.3 + 0.3
-      material.uniforms.audioLevel.value = audioLevelRef.current
+      // Calculate decay based on time since last beat
+      const timeSinceBeat = Date.now() - lastBeatTimeRef.current
+      const decayTime = 500 // ms for full decay (smoother)
+      const audioLevel = Math.max(0, 1 - (timeSinceBeat / decayTime))
+      material.uniforms.audioLevel.value = audioLevel
 
       renderer.render(scene, camera)
     }

@@ -867,6 +867,81 @@ function Deck({ deckId, isMain }) {
     emit('deck:pitch', { deck: deckId, pitch: clampedPitch })
   }, [deckId, deck.detectedBpm, emit, setDeckState])
 
+  // Emit audio level for visualizations (from main deck only)
+  useEffect(() => {
+    if (deckId !== 'A' || !isReady || !deck.playing) return
+
+    // Wait a bit for analyser to be ready
+    const startDelay = setTimeout(() => {
+      if (!analyserRef.current || !audioContextRef.current) return
+
+      // Ensure audio context is running
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume()
+      }
+
+      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
+      let lastEmit = 0
+      let frameId
+
+      // Simple beat detection - send raw pulse
+      let rollingAvg = 0.5
+      let lastBeatTime = 0
+      const BEAT_COOLDOWN = 200 // Minimum ms between beats
+
+      const emitAudioLevel = () => {
+        if (!analyserRef.current) return
+
+        const now = Date.now()
+        // Emit at ~30fps
+        if (now - lastEmit < 33) {
+          frameId = requestAnimationFrame(emitAudioLevel)
+          return
+        }
+        lastEmit = now
+
+        analyserRef.current.getByteFrequencyData(dataArray)
+
+        // Get current bass energy (first 8 bins)
+        let bassSum = 0
+        for (let i = 0; i < 8; i++) {
+          bassSum += dataArray[i]
+        }
+        const currentLevel = bassSum / (8 * 255)
+
+        // Update rolling average
+        rollingAvg = rollingAvg * 0.95 + currentLevel * 0.05
+
+        // Detect beat: current level significantly exceeds average AND cooldown passed
+        const diff = currentLevel - rollingAvg
+        const cooldownPassed = (now - lastBeatTime) > BEAT_COOLDOWN
+        const isBeat = diff > 0.03 && cooldownPassed
+
+        if (isBeat) {
+          lastBeatTime = now
+          emit('audio:level', { level: 1 })
+        }
+
+        frameId = requestAnimationFrame(emitAudioLevel)
+      }
+
+      frameId = requestAnimationFrame(emitAudioLevel)
+
+      // Store cleanup function
+      window._audioLevelCleanup = () => {
+        if (frameId) cancelAnimationFrame(frameId)
+      }
+    }, 500)
+
+    return () => {
+      clearTimeout(startDelay)
+      if (window._audioLevelCleanup) {
+        window._audioLevelCleanup()
+        window._audioLevelCleanup = null
+      }
+    }
+  }, [deckId, emit, isReady, deck.playing])
+
   // Beat sync - align this deck's beats with the other deck's beats
   const handleBeatSync = useCallback(() => {
     const otherDeckId = deckId === 'A' ? 'B' : 'A'

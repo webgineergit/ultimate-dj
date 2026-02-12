@@ -47,20 +47,16 @@ export default function tracksRouter(db) {
     }
   });
 
-  // Update track (for BPM, lyrics offset, etc.)
+  // Update track (for BPM, etc.)
   router.patch('/:id', (req, res) => {
     try {
-      const { bpm, lyrics_offset, artist, title } = req.body;
+      const { bpm, artist, title } = req.body;
       const updates = [];
       const values = [];
 
       if (bpm !== undefined) {
         updates.push('bpm = ?');
         values.push(bpm);
-      }
-      if (lyrics_offset !== undefined) {
-        updates.push('lyrics_offset = ?');
-        values.push(lyrics_offset);
       }
       if (artist !== undefined) {
         updates.push('artist = ?');

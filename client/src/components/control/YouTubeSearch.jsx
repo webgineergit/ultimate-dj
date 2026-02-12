@@ -53,6 +53,8 @@ function YouTubeSearch() {
             const trackRes = await fetch(`/api/tracks/${data.trackId}`)
             const track = await trackRes.json()
             addTrack(track)
+            // Remove from search results
+            setResults(prev => prev.filter(v => v.id !== video.id))
             setDownloading(prev => ({ ...prev, [video.id]: false }))
           } else if (progress.status === 'error') {
             console.error('Download failed:', progress.error)

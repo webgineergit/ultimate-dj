@@ -30,7 +30,6 @@ export default function lyricsRouter(db) {
         return res.json({
           trackId: track.id,
           lyrics: parseLRC(lyrics),
-          offset: track.lyrics_offset || 0,
           source: 'cache'
         });
       }
@@ -48,7 +47,6 @@ export default function lyricsRouter(db) {
         return res.json({
           trackId: track.id,
           lyrics: lyrics.parsed,
-          offset: track.lyrics_offset || 0,
           source: 'api'
         });
       }
@@ -83,27 +81,6 @@ export default function lyricsRouter(db) {
         lyrics: parseLRC(lyrics),
         source: 'manual'
       });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Update lyrics offset
-  router.patch('/:trackId/offset', (req, res) => {
-    try {
-      const { offset } = req.body;
-      if (offset === undefined) {
-        return res.status(400).json({ error: 'Offset is required' });
-      }
-
-      const result = db.prepare('UPDATE tracks SET lyrics_offset = ? WHERE id = ?')
-        .run(offset, req.params.trackId);
-
-      if (result.changes === 0) {
-        return res.status(404).json({ error: 'Track not found' });
-      }
-
-      res.json({ trackId: req.params.trackId, offset });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
