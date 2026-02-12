@@ -13,6 +13,12 @@ function TrackLibrary() {
   const [menuOpen, setMenuOpen] = useState(null)
   const inputRef = useRef(null)
 
+  // Bulk import state
+  const [showBulkImport, setShowBulkImport] = useState(false)
+  const [bulkUrls, setBulkUrls] = useState('')
+  const [bulkImporting, setBulkImporting] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState([]) // Array of { url, status, progress, error }
+
   // Close menu when clicking outside
   useEffect(() => {
     if (!menuOpen) return
@@ -100,6 +106,87 @@ function TrackLibrary() {
     }
   }
 
+  // Bulk import handler
+  const handleBulkImport = async () => {
+    const urls = bulkUrls
+      .split('\n')
+      .map(url => url.trim())
+      .filter(url => url.length > 0)
+
+    if (urls.length === 0) return
+
+    setBulkImporting(true)
+    setBulkProgress(urls.map(url => ({ url, status: 'pending', progress: 0 })))
+
+    // Import URLs sequentially to avoid overwhelming the server
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i]
+
+      // Update status to starting
+      setBulkProgress(prev => prev.map((item, idx) =>
+        idx === i ? { ...item, status: 'starting' } : item
+      ))
+
+      try {
+        const response = await fetch('/api/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        })
+
+        const { trackId } = await response.json()
+
+        // Poll for progress
+        await new Promise((resolve) => {
+          const pollProgress = async () => {
+            try {
+              const progressRes = await fetch(`/api/download/progress/${trackId}`)
+              const progressData = await progressRes.json()
+
+              setBulkProgress(prev => prev.map((item, idx) =>
+                idx === i ? { ...item, status: progressData.status, progress: progressData.progress || 0 } : item
+              ))
+
+              if (progressData.status === 'complete') {
+                // Fetch and add the track
+                const trackRes = await fetch(`/api/tracks/${trackId}`)
+                const track = await trackRes.json()
+                addTrack(track)
+                resolve()
+              } else if (progressData.status === 'error') {
+                setBulkProgress(prev => prev.map((item, idx) =>
+                  idx === i ? { ...item, status: 'error', error: progressData.error } : item
+                ))
+                resolve()
+              } else {
+                setTimeout(pollProgress, 500)
+              }
+            } catch (err) {
+              setBulkProgress(prev => prev.map((item, idx) =>
+                idx === i ? { ...item, status: 'error', error: err.message } : item
+              ))
+              resolve()
+            }
+          }
+          pollProgress()
+        })
+      } catch (err) {
+        setBulkProgress(prev => prev.map((item, idx) =>
+          idx === i ? { ...item, status: 'error', error: err.message } : item
+        ))
+      }
+    }
+
+    setBulkImporting(false)
+
+    // Clear and close after a short delay so user can see completion
+    setTimeout(() => {
+      setBulkUrls('')
+      setBulkProgress([])
+      setShowBulkImport(false)
+    }, 1500)
+  }
+
   const formatDuration = (seconds) => {
     if (!seconds) return '--:--'
     const mins = Math.floor(seconds / 60)
@@ -160,7 +247,52 @@ function TrackLibrary() {
             <span className="import-status-text">{getStatusText()}</span>
           </div>
         )}
+        <button
+          className="bulk-import-toggle"
+          onClick={() => setShowBulkImport(!showBulkImport)}
+          disabled={importing || bulkImporting}
+        >
+          {showBulkImport ? 'Single Import' : 'Bulk Import'}
+        </button>
       </div>
+
+      {/* Bulk Import Section */}
+      {showBulkImport && (
+        <div className="bulk-import-section">
+          <textarea
+            placeholder="Paste YouTube URLs (one per line)..."
+            value={bulkUrls}
+            onChange={e => setBulkUrls(e.target.value)}
+            disabled={bulkImporting}
+            className="bulk-import-textarea"
+            rows={5}
+          />
+          <button
+            onClick={handleBulkImport}
+            disabled={bulkImporting || !bulkUrls.trim()}
+            className="bulk-import-btn"
+          >
+            {bulkImporting ? 'Importing...' : `Import ${bulkUrls.split('\n').filter(u => u.trim()).length} URLs`}
+          </button>
+          {bulkProgress.length > 0 && (
+            <div className="bulk-progress-list">
+              {bulkProgress.map((item, idx) => (
+                <div key={idx} className={`bulk-progress-item ${item.status}`}>
+                  <span className="bulk-progress-url">{item.url.substring(0, 50)}{item.url.length > 50 ? '...' : ''}</span>
+                  <span className="bulk-progress-status">
+                    {item.status === 'pending' && '⏳'}
+                    {item.status === 'starting' && '🔄'}
+                    {item.status === 'downloading' && `${Math.round(item.progress)}%`}
+                    {item.status === 'fetching_lyrics' && '🎵'}
+                    {item.status === 'complete' && '✓'}
+                    {item.status === 'error' && '✗'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <input
         type="text"
@@ -208,7 +340,7 @@ function TrackLibrary() {
             </div>
             <div className="track-info">
               <div className="track-title">
-                {track.title}
+                <span className="track-title-text">{track.title}</span>
                 {track.has_synced_lyrics === 1 && (
                   <span className="lyrics-badge" title="Synced lyrics available">LYRICS</span>
                 )}

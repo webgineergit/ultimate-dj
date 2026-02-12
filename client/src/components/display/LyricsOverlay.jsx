@@ -4,11 +4,11 @@ import './LyricsOverlay.css'
 function LyricsOverlay({ trackId, currentTime, playing = false, pitch = 1 }) {
   const [lyrics, setLyrics] = useState([])
   const [loading, setLoading] = useState(false)
-  const [localTime, setLocalTime] = useState(currentTime)
+  const [displayTime, setDisplayTime] = useState(currentTime)
 
-  // Refs for time interpolation
-  const lastSyncTimeRef = useRef(currentTime)
-  const lastSyncRealTimeRef = useRef(Date.now())
+  // Refs for smooth interpolation between updates
+  const lastUpdateTimeRef = useRef(Date.now())
+  const lastCurrentTimeRef = useRef(currentTime)
 
   // Load lyrics for track
   useEffect(() => {
@@ -32,30 +32,35 @@ function LyricsOverlay({ trackId, currentTime, playing = false, pitch = 1 }) {
       .finally(() => setLoading(false))
   }, [trackId])
 
-  // Sync local time when currentTime prop changes significantly
+  // Always sync to incoming time - this is the source of truth
   useEffect(() => {
-    const timeDiff = Math.abs(currentTime - lastSyncTimeRef.current)
-    // Resync if time jumped more than 0.5 seconds or if paused
-    if (timeDiff > 0.5 || !playing) {
-      setLocalTime(currentTime)
-      lastSyncTimeRef.current = currentTime
-      lastSyncRealTimeRef.current = Date.now()
+    lastCurrentTimeRef.current = currentTime
+    lastUpdateTimeRef.current = Date.now()
+    // If not playing or time jumped significantly, snap immediately
+    if (!playing) {
+      setDisplayTime(currentTime)
     }
   }, [currentTime, playing])
 
-  // Interpolate time based on pitch when playing
+  // Smoothly interpolate between updates when playing
   useEffect(() => {
     if (!playing) {
-      setLocalTime(currentTime)
+      setDisplayTime(currentTime)
       return
     }
 
     let animationId
     const animate = () => {
       const now = Date.now()
-      const elapsed = (now - lastSyncRealTimeRef.current) / 1000 // seconds
-      const interpolatedTime = lastSyncTimeRef.current + (elapsed * pitch)
-      setLocalTime(interpolatedTime)
+      const elapsed = (now - lastUpdateTimeRef.current) / 1000
+      // Interpolate from last known time, but clamp to reasonable range
+      const interpolated = lastCurrentTimeRef.current + (elapsed * pitch)
+
+      // Never drift more than 0.5s from last known time - this prevents runaway drift
+      const maxDrift = 0.5
+      const clamped = Math.min(interpolated, lastCurrentTimeRef.current + maxDrift)
+
+      setDisplayTime(clamped)
       animationId = requestAnimationFrame(animate)
     }
 
@@ -63,8 +68,8 @@ function LyricsOverlay({ trackId, currentTime, playing = false, pitch = 1 }) {
     return () => cancelAnimationFrame(animationId)
   }, [playing, pitch, currentTime])
 
-  // Current time in milliseconds (using interpolated local time)
-  const currentTimeMs = localTime * 1000
+  // Current time in milliseconds (using display time which tracks source closely)
+  const currentTimeMs = displayTime * 1000
 
   // Find current line index
   const currentLineIndex = useMemo(() => {

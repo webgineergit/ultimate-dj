@@ -137,12 +137,18 @@
 .track-item .track-title {
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.track-title-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lyrics-badge {
@@ -272,4 +278,111 @@
   text-align: center;
   padding: 40px 20px;
   font-size: 14px;
+}
+
+/* Bulk Import */
+.bulk-import-toggle {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.bulk-import-toggle:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.bulk-import-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bulk-import-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: monospace;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.bulk-import-textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.bulk-import-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--accent-primary);
+  border-radius: 6px;
+}
+
+.bulk-import-btn:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.bulk-progress-list {
+  margin-top: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bulk-progress-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.bulk-progress-url {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+.bulk-progress-status {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.bulk-progress-item.pending .bulk-progress-status {
+  color: var(--text-muted);
+}
+
+.bulk-progress-item.starting .bulk-progress-status,
+.bulk-progress-item.downloading .bulk-progress-status,
+.bulk-progress-item.fetching_lyrics .bulk-progress-status {
+  color: var(--accent-primary);
+}
+
+.bulk-progress-item.complete .bulk-progress-status {
+  color: #10b981;
+}
+
+.bulk-progress-item.error .bulk-progress-status {
+  color: #ef4444;
 }
