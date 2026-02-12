@@ -5,6 +5,7 @@ import Deck from '../components/control/Deck'
 import Crossfader from '../components/control/Crossfader'
 import TrackLibrary from '../components/control/TrackLibrary'
 import TrackQueue from '../components/control/TrackQueue'
+import YouTubeSearch from '../components/control/YouTubeSearch'
 import DisplayToggles from '../components/control/DisplayToggles'
 import Soundboard from '../components/control/Soundboard'
 import './ControlWindow.css'
@@ -59,7 +60,10 @@ function ControlWindow() {
 
         <div className="bottom-section">
           <div className="library-queue-section">
-            <TrackLibrary />
+            <div className="search-library-container">
+              <YouTubeSearch />
+              <TrackLibrary />
+            </div>
             <TrackQueue />
           </div>
           <div className="controls-section">

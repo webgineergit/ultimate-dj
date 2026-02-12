@@ -1,16 +1,25 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useDJStore } from '../../store/djStore'
 import { useSocket } from '../../hooks/useSocket'
 import './TrackLibrary.css'
 
 function TrackLibrary() {
   const { emit } = useSocket()
-  const { tracks, setDeckTrack, addToQueue, addTrack } = useDJStore()
+  const { tracks, setDeckTrack, addToQueue, addTrack, removeTrack } = useDJStore()
   const [search, setSearch] = useState('')
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(null)
   const inputRef = useRef(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!menuOpen) return
+    const handleClick = () => setMenuOpen(null)
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [menuOpen])
 
   const filteredTracks = tracks.filter(track =>
     track.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -20,6 +29,19 @@ function TrackLibrary() {
   const loadToDeck = (track, deck) => {
     setDeckTrack(deck, track)
     emit('deck:load', { deck, trackId: track.id, autoplay: true })
+  }
+
+  const handleDelete = async (track) => {
+    if (!confirm(`Delete "${track.title}"?`)) return
+
+    try {
+      const res = await fetch(`/api/tracks/${track.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        removeTrack(track.id)
+      }
+    } catch (err) {
+      console.error('Delete failed:', err)
+    }
   }
 
   const handleImport = async () => {
@@ -151,15 +173,46 @@ function TrackLibrary() {
       <div className="tracks-list">
         {filteredTracks.map(track => (
           <div key={track.id} className="track-item">
-            {track.thumbnail_path && (
-              <img
-                src={`/media/videos/${track.thumbnail_path}`}
-                alt=""
-                className="track-thumb"
-              />
-            )}
+            <div className="track-thumb-container">
+              {track.thumbnail_path && (
+                <img
+                  src={`/media/videos/${track.thumbnail_path}`}
+                  alt=""
+                  className="track-thumb"
+                />
+              )}
+              <button
+                className="track-menu-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuOpen(menuOpen === track.id ? null : track.id)
+                }}
+                title="More options"
+              >
+                ⋮
+              </button>
+              {menuOpen === track.id && (
+                <div className="track-menu-popout">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(null)
+                      handleDelete(track)
+                    }}
+                    className="delete-btn"
+                    title="Delete track"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="track-info">
-              <div className="track-title">{track.title}</div>
+              <div className="track-title">
+                {track.title}
+                {track.has_synced_lyrics === 1 && (
+                  <span className="lyrics-badge" title="Synced lyrics available">LYRICS</span>
+                )}
+              </div>
               <div className="track-meta">
                 <span>{track.artist || 'Unknown'}</span>
                 <span>{formatDuration(track.duration)}</span>

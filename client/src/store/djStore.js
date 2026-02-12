@@ -101,6 +101,10 @@ export const useDJStore = create((set, get) => ({
     tracks: [track, ...state.tracks]
   })),
 
+  removeTrack: (trackId) => set((state) => ({
+    tracks: state.tracks.filter(t => t.id !== trackId)
+  })),
+
   setQueue: (queue) => set({ queue }),
 
   addToQueue: (track) => set((state) => ({

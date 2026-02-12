@@ -8,6 +8,9 @@ import { fetchLyrics, saveLyrics } from '../services/lyrics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const projectRoot = path.join(__dirname, '../..');
+const venvPython = path.join(projectRoot, '.venv/bin/python');
+const searchScript = path.join(__dirname, '../scripts/search_youtube.py');
 
 export default function downloadRouter(db) {
   const router = express.Router();
@@ -21,6 +24,32 @@ export default function downloadRouter(db) {
 
   // Download progress tracking
   const downloadProgress = new Map();
+
+  // Search YouTube with lyrics availability
+  router.get('/search', async (req, res) => {
+    const { q } = req.query;
+    if (!q) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    try {
+      const results = await searchYouTube(q);
+
+      // Get existing youtube_ids from the library
+      const existingIds = new Set(
+        db.prepare('SELECT youtube_id FROM tracks WHERE youtube_id IS NOT NULL')
+          .all()
+          .map(row => row.youtube_id)
+      );
+
+      // Filter out videos already in the library
+      const filteredResults = results.filter(video => !existingIds.has(video.id));
+
+      res.json(filteredResults);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // Get video info without downloading
   router.get('/info', async (req, res) => {
@@ -96,16 +125,19 @@ export default function downloadRouter(db) {
 
       downloadProgress.set(trackId, { status: 'fetching_lyrics', progress: 100, info });
 
-      // Try to fetch lyrics in the background (pass YouTube ID for better matching)
+      // Try to fetch synced lyrics from YouTube Music (no fallbacks)
       try {
         const lyrics = await fetchLyrics(info.title, info.artist || info.uploader, info.id);
-        if (lyrics) {
+        if (lyrics && lyrics.synced) {
           saveLyrics(trackId, lyrics.raw);
-          db.prepare('UPDATE tracks SET lyrics_path = ? WHERE id = ?')
-            .run(`${trackId}.lrc`, trackId);
-          console.log(`Lyrics saved for: ${info.title} (source: ${lyrics.source})`);
+          db.prepare('UPDATE tracks SET lyrics_path = ?, has_synced_lyrics = ? WHERE id = ?')
+            .run(`${trackId}.lrc`, 1, trackId);
+          console.log(`Synced lyrics saved for: ${info.title}`);
         } else {
-          console.log(`No lyrics found for: ${info.title}`);
+          // No synced lyrics available - mark as such
+          db.prepare('UPDATE tracks SET has_synced_lyrics = ? WHERE id = ?')
+            .run(0, trackId);
+          console.log(`No synced lyrics available for: ${info.title}`);
         }
       } catch (lyricsErr) {
         console.log('Lyrics fetch failed:', lyricsErr.message);
@@ -360,6 +392,51 @@ function downloadVideo(url, videoPath, thumbnailPath, onProgress) {
 
         resolve();
       }
+    });
+  });
+}
+
+// Helper function to search YouTube with lyrics availability check
+function searchYouTube(query) {
+  return new Promise((resolve, reject) => {
+    const args = [searchScript, query];
+    const proc = spawn(venvPython, args, {
+      cwd: projectRoot,
+      timeout: 60000
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('Search timed out'));
+    }, 60000);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0 && stdout) {
+        try {
+          resolve(JSON.parse(stdout));
+        } catch (e) {
+          reject(new Error('Invalid search response'));
+        }
+      } else {
+        reject(new Error(stderr || 'Search failed'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
     });
   });
 }

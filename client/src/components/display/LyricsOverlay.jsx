@@ -71,7 +71,10 @@ function LyricsOverlay({ trackId, currentTime }) {
     const lineDuration = nextLine.time - currentLine.time
     const elapsed = adjustedTime - currentLine.time
 
-    return Math.min(1, Math.max(0, elapsed / lineDuration))
+    // Vocals typically finish before the next line starts
+    // Scale so progress reaches 100% at ~75% of the line duration
+    const vocalDuration = lineDuration * 0.75
+    return Math.min(1, Math.max(0, elapsed / vocalDuration))
   }, [lyrics, currentLineIndex, adjustedTime])
 
   if (loading) return null
@@ -90,14 +93,13 @@ function LyricsOverlay({ trackId, currentTime }) {
             }}
           >
             {line.isCurrent ? (
-              <span className="lyrics-text-container">
-                <span
-                  className="lyrics-text-progress"
-                  style={{ width: `${lineProgress * 100}%` }}
-                >
-                  {line.text}
-                </span>
-                <span className="lyrics-text-base">{line.text}</span>
+              <span
+                className="lyrics-text-progress"
+                style={{
+                  '--progress': `${lineProgress * 100}%`
+                }}
+              >
+                {line.text}
               </span>
             ) : (
               <span>{line.text}</span>

@@ -52,6 +52,14 @@
   min-height: 0;
 }
 
+.search-library-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .controls-section {
   display: flex;
   flex-direction: column;

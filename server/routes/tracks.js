@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { spawn } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { fetchLyrics, saveLyrics } from '../services/lyrics.js';
 
@@ -94,10 +95,43 @@ export default function tracksRouter(db) {
   // Delete track
   router.delete('/:id', (req, res) => {
     try {
-      const result = db.prepare('DELETE FROM tracks WHERE id = ?').run(req.params.id);
-      if (result.changes === 0) {
+      // Get track info first to delete files
+      const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+      if (!track) {
         return res.status(404).json({ error: 'Track not found' });
       }
+
+      // Delete from database
+      db.prepare('DELETE FROM tracks WHERE id = ?').run(req.params.id);
+
+      // Delete physical files
+      const videosDir = path.join(__dirname, '../../data/videos');
+      const lyricsDir = path.join(__dirname, '../../data/lyrics');
+
+      // Delete video file
+      if (track.video_path) {
+        const videoPath = path.join(videosDir, track.video_path);
+        if (fs.existsSync(videoPath)) {
+          fs.unlinkSync(videoPath);
+        }
+      }
+
+      // Delete thumbnail
+      if (track.thumbnail_path) {
+        const thumbPath = path.join(videosDir, track.thumbnail_path);
+        if (fs.existsSync(thumbPath)) {
+          fs.unlinkSync(thumbPath);
+        }
+      }
+
+      // Delete lyrics file
+      if (track.lyrics_path) {
+        const lyricsPath = path.join(lyricsDir, track.lyrics_path);
+        if (fs.existsSync(lyricsPath)) {
+          fs.unlinkSync(lyricsPath);
+        }
+      }
+
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: error.message });

@@ -82,6 +82,14 @@ export function initDatabase() {
     // Column already exists, ignore
   }
 
+  // Migration: Add has_synced_lyrics column if it doesn't exist
+  try {
+    db.exec('ALTER TABLE tracks ADD COLUMN has_synced_lyrics BOOLEAN DEFAULT FALSE');
+    console.log('Added has_synced_lyrics column to tracks table');
+  } catch (e) {
+    // Column already exists, ignore
+  }
+
   console.log('Database initialized successfully');
   return db;
 }
