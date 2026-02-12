@@ -1,0 +1,51 @@
+==========================================
+   ULTIMATE DJ - SETUP INSTRUCTIONS
+==========================================
+
+FIRST TIME SETUP (only do this once):
+-------------------------------------
+
+1. Open Terminal
+   - Press Cmd + Space, type "Terminal", press Enter
+
+2. Drag the "setup.sh" file into the Terminal window
+   - This will paste the file path
+
+3. Press Enter to run the setup
+   - It will ask for your password (for installing software)
+   - Type your Mac password and press Enter
+   - (You won't see the password as you type - that's normal)
+
+4. Wait for it to finish (may take 5-10 minutes)
+
+
+TO START THE APP (every time you want to use it):
+-------------------------------------------------
+
+Double-click "start.command"
+
+The browser will open automatically to:
+http://localhost:5173
+
+
+TO STOP THE APP:
+----------------
+
+Close the Terminal window that opened, or press Ctrl+C
+
+
+TROUBLESHOOTING:
+----------------
+
+If "start.command" won't open:
+- Right-click it > Open > Click "Open" in the popup
+
+If the browser doesn't open automatically:
+- Manually go to http://localhost:5173
+
+If you see "port already in use":
+- Close any other Terminal windows running the app
+- Or restart your Mac
+
+
+==========================================

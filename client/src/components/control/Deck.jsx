@@ -770,10 +770,15 @@ function Deck({ deckId, isMain }) {
       }
     }
 
-    // Update visual position
+    // Update visual position and video frame
     setScrubTime(time)
     setDeckState(deckId, { time })
     emit('deck:timeUpdate', { deck: deckId, time })
+
+    // Update video element's currentTime so the preview updates live
+    if (audioRef.current) {
+      audioRef.current.currentTime = time
+    }
 
     lastScrubXRef.current = e.clientX
     lastScratchTimeRef.current = now
