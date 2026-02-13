@@ -104,16 +104,16 @@ function Deck({ deckId, isMain }) {
     return () => navigator.mediaDevices.removeEventListener('devicechange', getDevices)
   }, [])
 
-  // Apply selected audio output device
+  // Apply selected audio output device to AudioContext (since we use Web Audio API)
   useEffect(() => {
-    const video = audioRef.current
-    if (!video || !selectedDevice) return
+    const audioContext = audioContextRef.current
+    if (!audioContext || !selectedDevice) return
 
-    if (typeof video.setSinkId === 'function') {
-      video.setSinkId(selectedDevice)
+    if (typeof audioContext.setSinkId === 'function') {
+      audioContext.setSinkId(selectedDevice)
         .catch(err => console.log('Could not set audio output:', err.message))
     }
-  }, [selectedDevice])
+  }, [selectedDevice, audioContextReady])
 
   // Handle device selection change
   const handleDeviceChange = useCallback((e) => {
