@@ -5,7 +5,7 @@ import './Deck.css'
 
 function Deck({ deckId, isMain }) {
   const { emit } = useSocket()
-  const { decks, crossfader, queue, setDeckState, setDeckTrack, promoteDeck, setCrossfader, removeFromQueue, getEffectiveVolumes, mainOutputDevice, setMainOutputDevice } = useDJStore()
+  const { decks, crossfader, queue, setDeckState, setDeckTrack, promoteDeck, setCrossfader, removeFromQueue, getEffectiveVolumes, mainOutputDevice, setMainOutputDevice, setDeckBAudioElement } = useDJStore()
   const deck = decks[deckId]
   const effectiveVolume = getEffectiveVolumes()[deckId]
 
@@ -195,6 +195,9 @@ function Deck({ deckId, isMain }) {
         // Audio graph: source -> analyser -> destination
         sourceNodeRef.current.connect(analyserRef.current)
         analyserRef.current.connect(audioContextRef.current.destination)
+
+        // Signal that AudioContext is ready (triggers device routing)
+        setAudioContextReady(true)
       } catch (err) {
         console.log('Audio context setup:', err.message)
       }
@@ -448,6 +451,12 @@ function Deck({ deckId, isMain }) {
 
     // Handle track being cleared
     if (!deck.track) {
+      // During promotion, Deck B keeps playing until Deck A is ready
+      const { promotionInProgress } = useDJStore.getState()
+      if (promotionInProgress && deckId === 'B') {
+        return  // Keep playing - completePromotion will trigger cleanup
+      }
+
       video.pause()
       video.removeAttribute('src')
       video.load()
@@ -514,6 +523,11 @@ function Deck({ deckId, isMain }) {
       setError(null)
       setupAnalyzer()
 
+      // Register Deck B's audio element for promotion sync
+      if (deckId === 'B') {
+        setDeckBAudioElement(audio)
+      }
+
       // Load audio buffer for vinyl scratching (after analyzer creates AudioContext)
       if (audio.src) {
         loadAudioBuffer(audio.src)
@@ -534,11 +548,27 @@ function Deck({ deckId, isMain }) {
 
       // Autoplay if deck state says playing
       const currentDeck = useDJStore.getState().decks[deckId]
+      const { promotionInProgress, completePromotion, deckBAudioElement } = useDJStore.getState()
+
+      // During promotion, sync to Deck B's exact current position
+      if (deckId === 'A' && promotionInProgress && deckBAudioElement) {
+        audio.currentTime = deckBAudioElement.currentTime
+      }
+
       if (currentDeck.playing && audio.paused) {
         if (audioContextRef.current?.state === 'suspended') {
           audioContextRef.current.resume()
         }
-        audio.play().catch(err => console.log('Autoplay failed:', err.message))
+        audio.play().then(() => {
+          // If this is Deck A during promotion, signal that we're ready
+          if (deckId === 'A' && promotionInProgress) {
+            // Small delay to ensure audio is actually outputting
+            setTimeout(() => completePromotion(), 50)
+          }
+        }).catch(err => console.log('Autoplay failed:', err.message))
+      } else if (deckId === 'A' && promotionInProgress && !audio.paused) {
+        // Already playing (e.g., play() was called earlier), complete promotion
+        setTimeout(() => completePromotion(), 50)
       }
     }
 
@@ -608,6 +638,34 @@ function Deck({ deckId, isMain }) {
       audio.removeEventListener('pause', handlePause)
     }
   }, [deckId, emit, setDeckState, setDeckTrack, removeFromQueue, setupAnalyzer, drawWaveform, isScrubbing, loadAudioBuffer])
+
+  // Safety timeout: if Deck A doesn't signal ready during promotion, force complete
+  useEffect(() => {
+    if (deckId !== 'B') return
+
+    const checkPromotion = () => {
+      const { promotionInProgress, completePromotion } = useDJStore.getState()
+      if (promotionInProgress) {
+        const timeout = setTimeout(() => {
+          const { promotionInProgress: stillInProgress } = useDJStore.getState()
+          if (stillInProgress) {
+            console.warn('Promotion timeout - forcing cleanup')
+            completePromotion()
+          }
+        }, 2000)
+        return () => clearTimeout(timeout)
+      }
+    }
+
+    // Check on mount and subscribe to store changes
+    const unsubscribe = useDJStore.subscribe(checkPromotion)
+    const cleanup = checkPromotion()
+
+    return () => {
+      unsubscribe()
+      cleanup?.()
+    }
+  }, [deckId])
 
   // Sync play/pause state
   useEffect(() => {
@@ -731,11 +789,11 @@ function Deck({ deckId, isMain }) {
       audioContextRef.current.resume()
     }
 
-    // Set scratch gain volume
+    // Set scratch gain volume (Deck B cue not affected by crossfader)
     if (scratchGainRef.current) {
-      scratchGainRef.current.gain.value = effectiveVolume
+      scratchGainRef.current.gain.value = deckId === 'B' ? deck.volume : effectiveVolume
     }
-  }, [isReady, duration, deckId, setDeckState, effectiveVolume])
+  }, [isReady, duration, deckId, setDeckState, effectiveVolume, deck.volume])
 
   const handleScrubMove = useCallback((e) => {
     if (!isScrubbing) return

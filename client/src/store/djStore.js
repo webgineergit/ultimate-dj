@@ -33,6 +33,10 @@ export const useDJStore = create((set, get) => ({
   // Audio level for visualizations (0-1)
   audioLevel: 0,
 
+  // Promotion state (for seamless B->A transition)
+  promotionInProgress: false,
+  deckBAudioElement: null,  // Reference to Deck B's audio element for sync
+
   // Track library
   tracks: [],
 
@@ -67,6 +71,7 @@ export const useDJStore = create((set, get) => ({
   setMainDeck: (deck) => set({ mainDeck: deck }),
 
   // Promote: move track from B (Next Up) to A (Live)
+  // Phase 1: Copy B's state to A, but keep B playing until A is ready
   promoteDeck: () => set((state) => {
     const deckB = state.decks.B
 
@@ -81,12 +86,26 @@ export const useDJStore = create((set, get) => ({
           pitch: deckB.pitch || 1,
           detectedBpm: deckB.detectedBpm
         },
-        B: { trackId: null, track: null, playing: false, time: 0, volume: 1, pitch: 1, detectedBpm: null }
+        B: { ...state.decks.B }  // Keep B unchanged - will clear when A is ready
       },
       crossfader: 100,
-      mainDeck: 'A'
+      mainDeck: 'A',
+      promotionInProgress: true
     }
   }),
+
+  // Phase 2: Called when Deck A is ready and playing
+  completePromotion: () => set((state) => ({
+    decks: {
+      ...state.decks,
+      B: { trackId: null, track: null, playing: false, time: 0, volume: 1, pitch: 1, detectedBpm: null }
+    },
+    promotionInProgress: false,
+    deckBAudioElement: null
+  })),
+
+  // Register Deck B's audio element for promotion sync
+  setDeckBAudioElement: (element) => set({ deckBAudioElement: element }),
 
   setDisplayState: (layer, visible) => set((state) => ({
     display: { ...state.display, [layer]: visible }
